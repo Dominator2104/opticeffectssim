@@ -37,7 +37,7 @@ const $ = (id) => document.getElementById(id);
  * Verbindet die Bedienelemente mit dem Zustandsobjekt state.
  * onStarCount(n) wird aufgerufen, wenn die Sternzahl geändert wird.
  */
-export function createUI(state, { onStarCount, onLookAt, onMeasureSphere, onManualBeta }) {
+export function createUI(state, { onStarCount, onLookAt, onMeasureSphere, onManualBeta, overlay, onExport }) {
   const slider = $('beta-slider');
   const input = $('beta-input');
 
@@ -65,6 +65,29 @@ export function createUI(state, { onStarCount, onLookAt, onMeasureSphere, onManu
   bindCheckbox('fx-visible', (v) => (state.visibleOnly = v));
   bindCheckbox('fx-bands', (v) => (state.markBands = v));
   bindCheckbox('fx-window', (v) => (state.windowMarker = v));
+  bindCheckbox('fx-cockpit', (v) => {
+    overlay.setVisible(v);
+    $('cockpit-panel').classList.toggle('hidden', !v);
+  });
+  bindRange('cockpit-opacity', 'cockpit-opacity-out', (v) => overlay.setOpacity(v / 100), 0);
+  $('cockpit-choose').addEventListener('click', () => $('cockpit-file').click());
+  $('cockpit-file').addEventListener('change', (e) => {
+    if (e.target.files[0]) overlay.loadFile(e.target.files[0]);
+  });
+  setInterval(() => {
+    const t = `Bild: ${overlay.status()}`;
+    if ($('cockpit-status').textContent !== t) $('cockpit-status').textContent = t;
+  }, 300);
+
+  $('export-png').addEventListener('click', async () => {
+    $('export-status').textContent = 'Speichere …';
+    try {
+      const msg = await onExport($('export-caption').checked);
+      $('export-status').textContent = msg;
+    } catch (e) {
+      $('export-status').textContent = `Fehler: ${e.message}`;
+    }
+  });
   bindCheckbox('fx-bodies', (v) => {
     state.bodies.enabled = v;
     $('bodies-panel').classList.toggle('hidden', !v);

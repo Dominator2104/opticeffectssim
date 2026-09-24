@@ -27,6 +27,7 @@ import { bodyCenter } from './bodies.js';
 import { visibleLuminance } from './blackbody.js';
 import { generateStars } from './stars.js';
 import { createRenderer, WINDOW_HALF_ANGLE_DEG } from './render.js';
+import { createCockpitOverlay, composeSnapshot } from './overlay.js';
 import { createUI, createCharts, updateDebug, formatNumber, formatTime, BETA_MAX } from './ui.js';
 
 /** Zentraler Zustand der Simulation. UI schreibt hinein, Renderer liest daraus. */
@@ -73,7 +74,29 @@ const canvas = document.getElementById('canvas');
 const view = createRenderer(canvas);
 view.setStars(generateStars(state.starCount));
 
+const overlay = createCockpitOverlay(document.getElementById('cockpit'));
+
 const ui = createUI(state, {
+  overlay,
+  async onExport(withCaption) {
+    // Direkt nach dem Rendern auslesen (WebGL-Zeichenpuffer wird danach geleert)
+    view.render(renderState());
+    const projection = state.projection === 'stereographic' ? 'stereografisch' : 'Perspektive';
+    const caption = withCaption
+      ? `β = ${formatNumber(state.beta, 4)} · γ = ${formatNumber(state.gamma, 4)} · ${projection} · ` +
+        `Sichtfeld ${formatNumber(state.fovDeg, 3)}° · Simulation erstellt mit Claude Code (KI)`
+      : null;
+    const { blob, withoutCockpit } = await composeSnapshot(canvas, overlay, caption);
+    const name = `simulation_beta${state.beta.toFixed(4)}_${state.projection}.png`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    return withoutCockpit
+      ? `${name} gespeichert – OHNE Cockpit (Bild aus Datei-Pfad darf der Browser nicht mitspeichern; „Bild wählen…“ benutzen).`
+      : `${name} gespeichert.`;
+  },
   onStarCount(n) {
     state.starCount = n;
     view.setStars(generateStars(n));
