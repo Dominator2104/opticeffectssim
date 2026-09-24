@@ -330,6 +330,22 @@ export function visibleSpectralFactor(T, Tprime, Yrest, Yshifted) {
 export const WIEN_B = 2.897771955e-3;
 
 /**
+ * Strahldichte einer AUSGEDEHNTEN, selbstleuchtenden Fläche (Schwarzkörper
+ * der Temperatur T) NUR IM SICHTBAREN:
+ *
+ *   L'_vis / L_vis = Y(T') / Y(T)
+ *
+ * Begründung: Die Strahldichte eines Schwarzkörpers bleibt nach der
+ * Transformation eine Planck-Strahldichte, nun bei T' = T/D; es gibt keinen
+ * Raumwinkelfaktor wie beim Punkt. Zerlegt wie beim Stern:
+ *   Y(T')/Y(T) = D^(−4) · visibleSpectralFactor(T, T', Y(T), Y(T'))
+ * (Probe mit Y ∝ T⁴: ergibt D^(−4). Getestet.)
+ */
+export function beamingExtendedVisible(Yrest, Yshifted) {
+  return Yshifted / Yrest;
+}
+
+/**
  * Wiensches Verschiebungsgesetz: Wellenlänge des Strahlungsmaximums
  *
  *   λ_max = b / T

@@ -12,7 +12,9 @@ import {
   beamingPointSource,
   beamingPointSourceVisible,
   wienPeakWavelengthNm,
+  aberrateDirection,
 } from './physics.js';
+import { bodyCenter } from './bodies.js';
 import { visibleLuminance } from './blackbody.js';
 import { generateStars } from './stars.js';
 import { createRenderer } from './render.js';
@@ -33,6 +35,16 @@ const state = {
   yaw: 0,
   pitch: 0,
   starCount: 10000,
+  bodies: {
+    enabled: false,
+    showCube: true,
+    showSphere: true,
+    psi: Math.PI / 2, // Richtung der Körper in S (Bogenmaß)
+    distance: 10,
+    observerZ: 0,
+    exposureMag: 0,
+    uniformTemperature: false,
+  },
 };
 
 const canvas = document.getElementById('canvas');
@@ -43,6 +55,24 @@ createUI(state, {
   onStarCount(n) {
     state.starCount = n;
     view.setStars(generateStars(n));
+  },
+  onLookAt(which) {
+    // Kamera in die GESEHENE Richtung des Körpermittelpunkts drehen
+    const b = state.bodies;
+    const c = bodyCenter(b.psi, which === 'cube' ? 0 : Math.PI, b.distance, b.observerZ);
+    const len = Math.hypot(...c);
+    let n = c.map((v) => v / len);
+    if (state.aberration) n = aberrateDirection(state.beta, n);
+    // Blickrichtung f = (−sin yaw · cos pitch, sin pitch, cos yaw · cos pitch), siehe render.viewMatrix
+    state.pitch = Math.asin(Math.max(-1, Math.min(1, n[1])));
+    state.yaw = Math.atan2(-n[0], n[2]);
+  },
+  onMeasureSphere() {
+    view.render(renderState());
+    const r = view.measureSphereRoundness();
+    if (!r) return null;
+    const projection = state.projection === 'stereographic' ? 'stereografisch' : 'Perspektive';
+    return { ...r, projection };
   },
 });
 
@@ -58,8 +88,17 @@ function frame(now) {
   lastTime = now;
   fps += (1 / dt - fps) * 0.05;
 
+  view.render(renderState());
+
+  updateDebug(debugRows());
+
+  requestAnimationFrame(frame);
+}
+
+/** Zustand für den Renderer zusammenstellen. */
+function renderState() {
   state.gamma = lorentzGamma(state.beta);
-  view.render({
+  return {
     beta: state.beta,
     gamma: state.gamma,
     aberration: state.aberration,
@@ -73,11 +112,12 @@ function frame(now) {
     exposure: Math.pow(10, 0.4 * state.exposureMag),
     yaw: state.yaw,
     pitch: state.pitch,
-  });
-
-  updateDebug(debugRows());
-
-  requestAnimationFrame(frame);
+    bodies: {
+      ...state.bodies,
+      // Belichtung in mag → Strahldichte auf dem Bildschirm (0,18 = mittleres Grau bei 0 mag)
+      radiance: 0.18 * Math.pow(10, 0.4 * state.bodies.exposureMag),
+    },
+  };
 }
 
 /** Werte für das Debug-Panel, alle aus physics.js bzw. blackbody.js. */

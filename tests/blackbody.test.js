@@ -24,6 +24,8 @@ import {
   apparentTemperature,
   beamingPointSource,
   beamingPointSourceVisible,
+  beamingExtended,
+  beamingExtendedVisible,
   visibleSpectralFactor,
   wienPeakWavelengthNm,
   peakBand,
@@ -118,6 +120,20 @@ describe('Helligkeit nur im Sichtbaren', () => {
       }
     }
     expect(visibleSpectralFactor(5800, 5800, 3, 3)).toBe(1);
+  });
+
+  it('Fläche nur sichtbar: Y(T\')/Y(T) = D^(−4) · Spektralfaktor, Probe Y ∝ T⁴ ergibt D^(−4)', () => {
+    for (const beta of [0.3, 0.9, 0.99]) {
+      for (const D of [dopplerFactorForward(beta), dopplerFactorBackward(beta)]) {
+        const T = 5800;
+        const Tp = apparentTemperature(T, D);
+        const Y = visibleLuminance(T);
+        const Yp = visibleLuminance(Tp);
+        const product = beamingExtended(D) * visibleSpectralFactor(T, Tp, Y, Yp);
+        expect(product / beamingExtendedVisible(Y, Yp)).toBeCloseTo(1, 10);
+        expect(beamingExtendedVisible(T ** 4, Tp ** 4) / beamingExtended(D)).toBeCloseTo(1, 10);
+      }
+    }
   });
 
   it('Lage des Maximums: Sonne sichtbar, 2 500 K im IR, 30 000 K im UV', () => {

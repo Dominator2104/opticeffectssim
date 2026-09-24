@@ -18,6 +18,7 @@
  *   2. Dieses Bild einmal nach sRGB umrechnen und auf den Bildschirm bringen.
  */
 import * as THREE from 'three';
+import { createCubeGeometry, createSphereGeometry, bodyCenter, BODY_TEMPERATURE } from './bodies.js';
 import { buildBlackbodyTable, visibleLuminance, TABLE_SIZE, TABLE_T_MIN, TABLE_T_MAX } from './blackbody.js';
 
 /* ------------------------------------------------------------------------- */
@@ -279,6 +280,102 @@ function createStarPoints(stars, sharedUniforms) {
 }
 
 /* ------------------------------------------------------------------------- */
+/* Terrell-Körper (Würfel, Kugel)                                            */
+/* ------------------------------------------------------------------------- */
+
+const BODY_VERTEX = /* glsl */ `
+${GLSL_PHYSICS}
+${GLSL_PROJECTION}
+uniform bool uAberration;
+uniform vec3 uCenter;      // Mittelpunkt des Körpers in S relativ zum Beobachter
+
+in float aTemperature;
+out vec3 vPosS;            // Oberflächenpunkt in S relativ zum Beobachter
+out vec3 vNormalS;
+out vec2 vUv;
+out float vTemperature;
+
+void main() {
+  vec3 p = uCenter + position;                  // Körper ruht in S
+  float r = length(p);
+  vec3 n = p / r;                                // 1. Richtung zum Punkt in S
+  vec3 nSeen = uAberration ? aberrateDirection(n) : n;   // 2. Aberration wie bei den Sternen
+  // Entfernung des Emissionsereignisses in S' ist r/D; nur für den Tiefenpuffer.
+  float distSeen = uAberration ? r / dopplerFactor(n.z) : r;
+  gl_Position = projectDirection(nSeen, distSeen);        // 3. projizieren
+  vPosS = p;
+  vNormalS = normal;
+  vUv = uv;
+  vTemperature = aTemperature;
+}
+`;
+
+const BODY_FRAGMENT = /* glsl */ `
+precision highp float;
+${GLSL_PHYSICS}
+${GLSL_BLACKBODY}
+uniform bool uDoppler;
+uniform bool uBeaming;
+uniform bool uVisibleOnly;
+uniform bool uUniformTemperature;
+uniform float uBodyTemperature;
+uniform float uRadiance;   // Strahldichte in Ruhe, in Bildschirmeinheiten (Belichtung)
+uniform vec2 uChecker;     // Anzahl Felder des Schachbretts in u und v
+
+in vec3 vPosS;
+in vec3 vNormalS;
+in vec2 vUv;
+in float vTemperature;
+out vec4 fragColor;
+
+void main() {
+  // Sichtbarkeit wird in S entschieden: Eine Fläche ist sichtbar, wenn sie in S
+  // zum Beobachter hin abstrahlt. Welche Lichtstrahlen den Beobachter treffen,
+  // hängt nicht vom Bezugssystem ab.
+  if (dot(vNormalS, vPosS) >= 0.0) discard;
+
+  vec3 n = normalize(vPosS);
+  float D = dopplerFactor(n.z);                  // D für diesen Oberflächenpunkt
+  float T = uUniformTemperature ? uBodyTemperature : vTemperature;
+  float Tseen = uDoppler ? apparentTemperature(T, D) : T;
+  vec3 color = blackbodyLookup(Tseen).rgb;
+
+  // Schachbrett: helle und dunkle Felder (Emission 1 bzw. 0,5)
+  vec2 cell = floor(vUv * uChecker);
+  float pattern = mod(cell.x + cell.y, 2.0) < 0.5 ? 1.0 : 0.5;
+
+  // Helligkeit: ausgedehnte Fläche → D^(−4), nicht D^(−2)!
+  float L = uRadiance * pattern;
+  if (uBeaming) L *= beamingExtended(D);
+  if (uVisibleOnly) L *= visibleSpectralFactor(T, Tseen);
+
+  // gleiche Strahldichte → gleiche Helligkeit, unabhängig vom Farbton
+  float colorLuminance = max(dot(color, vec3(0.2126, 0.7152, 0.0722)), 1.0e-3);
+  fragColor = vec4(color * (L / colorLuminance), 1.0);
+}
+`;
+
+function createBodyMesh(geometry, sharedUniforms, checker) {
+  const material = new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    vertexShader: BODY_VERTEX,
+    fragmentShader: BODY_FRAGMENT,
+    uniforms: {
+      ...sharedUniforms,
+      uCenter: { value: new THREE.Vector3() },
+      uChecker: { value: new THREE.Vector2(checker[0], checker[1]) },
+    },
+    side: THREE.DoubleSide,
+    depthTest: true,
+    depthWrite: true,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = -1; // vor den Sternen zeichnen, damit sie verdeckt werden
+  return mesh;
+}
+
+/* ------------------------------------------------------------------------- */
 /* Ausgabe: linear → sRGB                                                    */
 /* ------------------------------------------------------------------------- */
 
@@ -383,6 +480,9 @@ export function createRenderer(canvas) {
     uLogTMin: { value: Math.log10(TABLE_T_MIN) },
     uLogTMax: { value: Math.log10(TABLE_T_MAX) },
     uTableSize: { value: TABLE_SIZE },
+    uUniformTemperature: { value: false },
+    uBodyTemperature: { value: BODY_TEMPERATURE },
+    uRadiance: { value: 0.18 },
   };
 
   const scene = new THREE.Scene();
@@ -406,6 +506,12 @@ export function createRenderer(canvas) {
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), outputMaterial);
   quad.frustumCulled = false;
   outputScene.add(quad);
+
+  // Würfel (Kante 2) und Kugel (Radius 1); Schachbrett 4 × 4 je Würfelfläche,
+  // 16 × 8 Felder auf der Kugel (Länge × Breite)
+  const cube = createBodyMesh(createCubeGeometry(2), uniforms, [4, 4]);
+  const sphere = createBodyMesh(createSphereGeometry(1), uniforms, [16, 8]);
+  scene.add(cube, sphere);
 
   function setStars(stars) {
     if (starPoints) {
@@ -447,6 +553,15 @@ export function createRenderer(canvas) {
     uniforms.uExposure.value = s.exposure;
     uniforms.uView.value = viewMatrix(s.yaw, s.pitch);
 
+    // Körper: Würfel links (φ = 0), Kugel rechts (φ = 180°), beide unter ψ in S
+    const b = s.bodies;
+    cube.visible = b.enabled && b.showCube;
+    sphere.visible = b.enabled && b.showSphere;
+    cube.material.uniforms.uCenter.value.fromArray(bodyCenter(b.psi, 0, b.distance, b.observerZ));
+    sphere.material.uniforms.uCenter.value.fromArray(bodyCenter(b.psi, Math.PI, b.distance, b.observerZ));
+    uniforms.uUniformTemperature.value = b.uniformTemperature;
+    uniforms.uRadiance.value = b.radiance;
+
     renderer.setRenderTarget(target);
     renderer.setClearColor(0x000000, 1);
     renderer.clear();
@@ -455,5 +570,53 @@ export function createRenderer(canvas) {
     renderer.render(outputScene, camera);
   }
 
-  return { renderer, setStars, resize, render };
+  /**
+   * Selbsttest "Kugel bleibt kreisrund": Rendert nur die Kugel mit der
+   * aktuellen Ansicht, liest das Bild aus und bestimmt aus den zweiten Momenten
+   * der Kugelfläche das Achsenverhältnis (1 = exakter Kreis). Muss nach
+   * render(s) aufgerufen werden, damit alle Uniforms aktuell sind.
+   * @returns {{ratio:number, radiusPx:number}|null}  null, wenn die Kugel nicht im Bild ist
+   */
+  function measureSphereRoundness() {
+    const w = target.width;
+    const h = target.height;
+    const saved = scene.children.map((o) => o.visible);
+    scene.children.forEach((o) => (o.visible = o === sphere));
+    const wasVisible = sphere.visible;
+    sphere.visible = true;
+    renderer.setRenderTarget(target);
+    renderer.setClearColor(0x000000, 1);
+    renderer.clear();
+    renderer.render(scene, camera);
+    const pixels = new Uint16Array(w * h * 4);
+    renderer.readRenderTargetPixels(target, 0, 0, w, h, pixels);
+    renderer.setRenderTarget(null);
+    scene.children.forEach((o, i) => (o.visible = saved[i]));
+    sphere.visible = wasVisible;
+
+    let n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, touchesEdge = false;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = 4 * (y * w + x);
+        const v = Math.max(
+          THREE.DataUtils.fromHalfFloat(pixels[i]),
+          THREE.DataUtils.fromHalfFloat(pixels[i + 1]),
+          THREE.DataUtils.fromHalfFloat(pixels[i + 2]),
+        );
+        if (v > 1e-4) {
+          n++; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y;
+          if (x === 0 || y === 0 || x === w - 1 || y === h - 1) touchesEdge = true;
+        }
+      }
+    }
+    if (n < 50 || touchesEdge) return null;
+    const mx = sx / n, my = sy / n;
+    const cxx = sxx / n - mx * mx, cyy = syy / n - my * my, cxy = sxy / n - mx * my;
+    const tr = cxx + cyy;
+    const disc = Math.sqrt(Math.max(0, (tr * tr) / 4 - (cxx * cyy - cxy * cxy)));
+    // Für eine Ellipse sind die Eigenwerte der Momentenmatrix a²/4 und b²/4.
+    return { ratio: Math.sqrt((tr / 2 + disc) / (tr / 2 - disc)), radiusPx: Math.sqrt(n / Math.PI) };
+  }
+
+  return { renderer, setStars, resize, render, measureSphereRoundness };
 }

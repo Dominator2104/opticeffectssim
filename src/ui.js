@@ -37,7 +37,7 @@ const $ = (id) => document.getElementById(id);
  * Verbindet die Bedienelemente mit dem Zustandsobjekt state.
  * onStarCount(n) wird aufgerufen, wenn die Sternzahl geändert wird.
  */
-export function createUI(state, { onStarCount }) {
+export function createUI(state, { onStarCount, onLookAt, onMeasureSphere }) {
   const slider = $('beta-slider');
   const input = $('beta-input');
 
@@ -55,6 +55,27 @@ export function createUI(state, { onStarCount }) {
   bindCheckbox('fx-beaming', (v) => (state.beaming = v));
   bindCheckbox('fx-visible', (v) => (state.visibleOnly = v));
   bindCheckbox('fx-bands', (v) => (state.markBands = v));
+  bindCheckbox('fx-bodies', (v) => {
+    state.bodies.enabled = v;
+    $('bodies-panel').classList.toggle('hidden', !v);
+  });
+  bindCheckbox('body-cube', (v) => (state.bodies.showCube = v));
+  bindCheckbox('body-sphere', (v) => (state.bodies.showSphere = v));
+  bindCheckbox('body-uniform', (v) => (state.bodies.uniformTemperature = v));
+  bindRange('body-psi', 'body-psi-out', (v) => (state.bodies.psi = (v * Math.PI) / 180), 0);
+  bindRange('body-dist', 'body-dist-out', (v) => (state.bodies.distance = v), 1);
+  bindRange('body-z', 'body-z-out', (v) => (state.bodies.observerZ = v), 1);
+  bindRange('body-exp', 'body-exp-out', (v) => (state.bodies.exposureMag = v), 1);
+  $('look-cube').addEventListener('click', () => onLookAt('cube'));
+  $('look-sphere').addEventListener('click', () => onLookAt('sphere'));
+  $('measure-sphere').addEventListener('click', () => {
+    const r = onMeasureSphere();
+    $('measure-result').textContent = r
+      ? `Achsenverhältnis ${r.ratio.toFixed(4)} bei β = ${state.beta.toFixed(4)}, ` +
+        `Radius ${r.radiusPx.toFixed(0)} px (${r.projection}).`
+      : 'Kugel nicht vollständig im Bild — erst „Blick auf Kugel“.';
+  });
+
   $('projection').addEventListener('change', (e) => (state.projection = e.target.value));
   bindRange('fov', 'fov-out', (v) => (state.fovDeg = v), 0);
   bindRange('exposure', 'exposure-out', (v) => (state.exposureMag = v), 1);

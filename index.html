@@ -41,6 +41,31 @@
           <label class="check"><input id="fx-bands" type="checkbox" /> Maximum außerhalb des Sichtbaren kennzeichnen</label>
           <p class="note indent"><span class="sym">◯</span> Ring: λ<sub>max</sub> &lt; 380 nm (UV) ·
             <span class="sym">□</span> Quadrat: λ<sub>max</sub> &gt; 780 nm (IR), nach Wien λ<sub>max</sub> = b/T′</p>
+          <label class="check"><input id="fx-bodies" type="checkbox" /> Terrell-Körper (Würfel und Kugel)</label>
+          <div id="bodies-panel" class="subpanel">
+            <div class="row">
+              <label class="check"><input id="body-cube" type="checkbox" checked /> Würfel (links)</label>
+              <label class="check"><input id="body-sphere" type="checkbox" checked /> Kugel (rechts)</label>
+            </div>
+            <label class="row">Richtung ψ in S <span><output id="body-psi-out">90</output>°</span></label>
+            <input id="body-psi" type="range" min="0" max="180" step="1" value="90" />
+            <label class="row">Entfernung <span><output id="body-dist-out">10</output> Kugelradien</span></label>
+            <input id="body-dist" type="range" min="3" max="40" step="0.5" value="10" />
+            <label class="row">Beobachter auf z-Achse <span><output id="body-z-out">0</output></span></label>
+            <input id="body-z" type="range" min="-30" max="30" step="0.5" value="0" />
+            <label class="row">Belichtung Körper <span><output id="body-exp-out">0.0</output> mag</span></label>
+            <input id="body-exp" type="range" min="-8" max="4" step="0.1" value="0" />
+            <label class="check"><input id="body-uniform" type="checkbox" /> Alle Flächen 5 800 K</label>
+            <p class="note">Sonst Würfelflächen: vorn (+z) 9 000 K, hinten (−z) 3 500 K, Seiten 5 800 K.</p>
+            <div class="row buttons">
+              <button id="look-cube" type="button">Blick auf Würfel</button>
+              <button id="look-sphere" type="button">Blick auf Kugel</button>
+            </div>
+            <div class="row buttons">
+              <button id="measure-sphere" type="button">Rundheit der Kugel messen</button>
+            </div>
+            <p class="note" id="measure-result">Selbsttest: Achsenverhältnis des Kugelbilds (1 = Kreis).</p>
+          </div>
           <p class="note footnote">* Bei großem β wandert sichtbares Licht ins UV und Infrarotes ins
             Sichtbare. Gezeigt wird die Farbe des verschobenen Schwarzkörpers (T′ = T/D); das ist
             korrekt, solange man das Sternspektrum als vollständiges Planck-Spektrum annimmt.</p>

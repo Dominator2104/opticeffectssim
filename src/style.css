@@ -63,6 +63,14 @@ select {
 .note.indent { margin: 0 0 4px 22px; }
 .note.footnote { margin-top: 8px; }
 .sym { font-size: 12px; }
+.subpanel { margin: 2px 0 6px 22px; padding-left: 8px; border-left: 2px solid var(--border); }
+.subpanel.hidden { display: none; }
+.buttons { justify-content: flex-start; margin-top: 6px; }
+button {
+  background: #1f2533; color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 3px 8px; cursor: pointer; font: inherit; font-size: 12px;
+}
+button:hover { border-color: var(--accent); }
 
 #debug { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; }
 #debug td { padding: 1px 0; vertical-align: top; }
