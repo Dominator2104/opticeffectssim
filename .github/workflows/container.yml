@@ -1,0 +1,90 @@
+# Erstellt mit Claude Code (KI-Werkzeug) im Auftrag von Dominik Wittkow,
+# W-Seminar Physik, CSG Ingolstadt, 24.09.2026.
+#
+# Baut bei jedem Push auf main (oder manuell) das Container-Image und
+# veröffentlicht es als GitHub-Paket in der GitHub Container Registry:
+#   ghcr.io/dominator2104/opticeffectssim:latest
+# Der Container liefert die Simulation auf Port 5000 aus.
+
+name: Container-Image veröffentlichen
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# nur ein Lauf gleichzeitig; ein neuerer Push ersetzt einen laufenden
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    # Der manuelle Start lässt sich im Formular auch für andere Branches
+    # auswählen – veröffentlicht wird trotzdem nur von main.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quelltext holen
+        uses: actions/checkout@v5
+
+      - name: Node.js einrichten
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Abhängigkeiten installieren
+        run: npm ci --no-audit --no-fund
+
+      - name: Tests der Physik
+        run: npm test
+
+      - name: Image-Namen festlegen (Registry verlangt Kleinbuchstaben)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: QEMU für arm64 einrichten
+        uses: docker/setup-qemu-action@v3
+
+      - name: Docker Buildx einrichten
+        uses: docker/setup-buildx-action@v3
+
+      - name: Bei der GitHub Container Registry anmelden
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags und Beschriftungen erzeugen
+        id: meta
+        uses: docker/metadata-action@v5
+        env:
+          # Beschreibung auch am Multi-Arch-Index, damit GHCR sie anzeigt
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=opticeffectssim
+            org.opencontainers.image.description=Simulation optischer Effekte bei Bewegung nahe der Lichtgeschwindigkeit (nginx, Port 5000). Erstellt mit Claude Code (KI).
+          annotations: |
+            org.opencontainers.image.description=Simulation optischer Effekte bei Bewegung nahe der Lichtgeschwindigkeit (nginx, Port 5000). Erstellt mit Claude Code (KI).
+
+      - name: Image bauen und veröffentlichen
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
