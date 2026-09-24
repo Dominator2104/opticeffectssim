@@ -1,0 +1,2 @@
+Hier assets/cockpit.png ablegen (Standbild, urheberrechtlich geschützt,
+nur lokal verwenden, steht in .gitignore).

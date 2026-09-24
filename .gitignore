@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.DS_Store
+
+# Urheberrechtlich geschütztes Standbild aus dem Film: nur lokal verwenden,
+# niemals committen oder veröffentlichen.
+assets/cockpit.png
