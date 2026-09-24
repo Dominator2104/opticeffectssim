@@ -1,0 +1,77 @@
+/*
+ * Erstellt mit Claude Code (KI-Werkzeug) im Auftrag von Dominik Wittkow,
+ * W-Seminar Physik, CSG Ingolstadt, 24.09.2026.
+ */
+:root {
+  --bg: #0b0d12;
+  --panel: #151922;
+  --border: #2a3040;
+  --text: #d8dde8;
+  --muted: #8a93a6;
+  --accent: #7fb2ff;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; height: 100%; overflow: hidden; }
+
+body { display: flex; flex-direction: column; }
+
+#app { flex: 1; display: flex; min-height: 0; }
+
+#view { position: relative; flex: 1; min-width: 0; background: #000; }
+
+#canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+#canvas:active { cursor: grabbing; }
+
+#hint {
+  position: absolute; left: 8px; bottom: 6px;
+  font-size: 11px; color: var(--muted); pointer-events: none;
+}
+
+#panel {
+  width: 330px; flex: none; overflow-y: auto;
+  background: var(--panel); border-left: 1px solid var(--border);
+  padding: 10px 14px 20px;
+}
+
+h1 { font-size: 16px; margin: 4px 0 10px; }
+h2 {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--muted); margin: 16px 0 6px;
+  border-bottom: 1px solid var(--border); padding-bottom: 3px;
+}
+
+.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; }
+.row input[type='range'] { flex: 1; }
+input[type='range'] { width: 100%; accent-color: var(--accent); }
+input[type='number'] {
+  width: 84px; background: #0e1118; color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px;
+  font-variant-numeric: tabular-nums;
+}
+select {
+  background: #0e1118; color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 2px 4px;
+}
+.check { display: block; margin: 3px 0; }
+.note { font-size: 11px; color: var(--muted); margin: 2px 0 0; }
+
+#debug { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; }
+#debug td { padding: 1px 0; vertical-align: top; }
+#debug td:last-child { text-align: right; white-space: nowrap; padding-left: 8px; }
+
+#footer {
+  flex: none; font-size: 12px; color: var(--muted);
+  padding: 4px 10px; border-top: 1px solid var(--border); background: var(--panel);
+}
+
+@media (max-width: 760px) {
+  #app { flex-direction: column; }
+  #view { flex: 1 1 55%; }
+  #panel { width: 100%; flex: 1 1 45%; border-left: none; border-top: 1px solid var(--border); }
+}
