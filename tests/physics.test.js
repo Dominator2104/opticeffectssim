@@ -318,9 +318,9 @@ describe('Weitere Selbsttests', () => {
   });
 
   it('Fenster ±16°: Licht stammt aus einem größeren Himmelsbereich in S', () => {
-    // Umkehrung der Aberration: ψ' = 16° kommt bei β = 0,9 aus ψ ≈ 59° in S
+    // Umkehrung der Aberration: ψ' = 16° kommt bei β = 0,9 aus ψ ≈ 63,0° in S
     const psi = deg(Math.acos(inverseAberrationCosPsi(0.9, Math.cos(rad(16)))));
-    expect(psi).toBeGreaterThan(16);
+    expect(psi).toBeCloseTo(62.98, 2);
     expect(deg(aberrationPsi(0.9, rad(psi)))).toBeCloseTo(16, 9);
   });
 
