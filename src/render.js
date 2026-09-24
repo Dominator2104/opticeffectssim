@@ -376,6 +376,57 @@ function createBodyMesh(geometry, sharedUniforms, checker) {
 }
 
 /* ------------------------------------------------------------------------- */
+/* Sichtfeldmarkierung                                                       */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Halber Öffnungswinkel des Cockpitfensters in der untersuchten Filmszene
+ * (±16° um die Flugrichtung, siehe Seminararbeit).
+ */
+export const WINDOW_HALF_ANGLE_DEG = 16;
+
+const MARKER_VERTEX = /* glsl */ `
+${GLSL_PROJECTION}
+void main() {
+  // Die Markierung gehört zum Raumschiff (System S'), wird also NICHT aberriert.
+  gl_Position = projectDirection(normalize(position), 1.0e5);
+}
+`;
+
+const MARKER_FRAGMENT = /* glsl */ `
+precision highp float;
+out vec4 fragColor;
+void main() {
+  fragColor = vec4(0.20, 0.55, 0.30, 1.0);
+}
+`;
+
+/** Kreis ψ' = konst. um die Flugrichtung (+z) im Raumschiffsystem. */
+function createWindowMarker(sharedUniforms, halfAngleDeg, segments = 256) {
+  const a = (halfAngleDeg * Math.PI) / 180;
+  const pts = [];
+  for (let i = 0; i < segments; i++) {
+    const phi = (2 * Math.PI * i) / segments;
+    pts.push(Math.sin(a) * Math.cos(phi), Math.sin(a) * Math.sin(phi), Math.cos(a));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);
+  const m = new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    vertexShader: MARKER_VERTEX,
+    fragmentShader: MARKER_FRAGMENT,
+    uniforms: sharedUniforms,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const line = new THREE.LineLoop(g, m);
+  line.frustumCulled = false;
+  line.renderOrder = 10;
+  return line;
+}
+
+/* ------------------------------------------------------------------------- */
 /* Ausgabe: linear → sRGB                                                    */
 /* ------------------------------------------------------------------------- */
 
@@ -512,6 +563,8 @@ export function createRenderer(canvas) {
   const cube = createBodyMesh(createCubeGeometry(2), uniforms, [4, 4]);
   const sphere = createBodyMesh(createSphereGeometry(1), uniforms, [16, 8]);
   scene.add(cube, sphere);
+  const windowMarker = createWindowMarker(uniforms, WINDOW_HALF_ANGLE_DEG);
+  scene.add(windowMarker);
 
   function setStars(stars) {
     if (starPoints) {
@@ -561,6 +614,7 @@ export function createRenderer(canvas) {
     sphere.material.uniforms.uCenter.value.fromArray(bodyCenter(b.psi, Math.PI, b.distance, b.observerZ));
     uniforms.uUniformTemperature.value = b.uniformTemperature;
     uniforms.uRadiance.value = b.radiance;
+    windowMarker.visible = s.windowMarker;
 
     renderer.setRenderTarget(target);
     renderer.setClearColor(0x000000, 1);

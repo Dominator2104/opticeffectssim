@@ -31,6 +31,41 @@
         </section>
 
         <section>
+          <h2>Beschleunigungsphase</h2>
+          <label class="row">Kurve
+            <select id="acc-curve">
+              <option value="constant" selected>konstante Eigenbeschleunigung</option>
+              <option value="linear">linear in β (didaktisch)</option>
+              <option value="smooth">weiche Ein-/Ausblendkurve</option>
+            </select>
+          </label>
+          <label class="row">Beschleunigung a
+            <span><input id="acc-a" type="number" min="0.01" max="1000000" step="any" value="9.81" /> m/s²</span>
+          </label>
+          <input id="acc-a-slider" type="range" min="-1" max="6" step="0.01" value="0.9917" />
+          <label class="row">Dauer (Zeit in S)
+            <span>
+              <input id="acc-duration" type="number" min="0.001" step="any" value="5" />
+              <select id="acc-unit">
+                <option value="1">s</option>
+                <option value="3600">h</option>
+                <option value="86400">Tage</option>
+                <option value="31557600" selected>Jahre</option>
+              </select>
+            </span>
+          </label>
+          <label class="row">Abspielzeit
+            <span><input id="acc-play" type="number" min="1" max="600" step="1" value="20" /> s</span>
+          </label>
+          <div class="row buttons">
+            <button id="acc-start" type="button">▶ Start</button>
+            <button id="acc-pause" type="button">⏸ Pause</button>
+            <button id="acc-reset" type="button">⟲ Zurücksetzen</button>
+          </div>
+          <p class="note" id="acc-info"></p>
+        </section>
+
+        <section>
           <h2>Effekte</h2>
           <label class="check"><input id="fx-aberration" type="checkbox" checked /> Aberration (Richtung)</label>
           <label class="check"><input id="fx-doppler" type="checkbox" checked /> Doppler-Effekt (Farbe)</label>
@@ -41,6 +76,7 @@
           <label class="check"><input id="fx-bands" type="checkbox" /> Maximum außerhalb des Sichtbaren kennzeichnen</label>
           <p class="note indent"><span class="sym">◯</span> Ring: λ<sub>max</sub> &lt; 380 nm (UV) ·
             <span class="sym">□</span> Quadrat: λ<sub>max</sub> &gt; 780 nm (IR), nach Wien λ<sub>max</sub> = b/T′</p>
+          <label class="check"><input id="fx-window" type="checkbox" checked /> Sichtfeldmarkierung ±16° (Cockpitfenster der Filmszene)</label>
           <label class="check"><input id="fx-bodies" type="checkbox" /> Terrell-Körper (Würfel und Kugel)</label>
           <div id="bodies-panel" class="subpanel">
             <div class="row">
@@ -91,6 +127,20 @@
               <option value="50000">50 000</option>
             </select>
           </label>
+        </section>
+
+        <section>
+          <h2>Graphen</h2>
+          <figure class="chart">
+            <figcaption>Lorentzfaktor γ über β</figcaption>
+            <canvas id="gamma-graph" aria-label="Graph des Lorentzfaktors γ über β mit Marker beim aktuellen Wert"></canvas>
+            <div class="chart-tip" id="gamma-tip" hidden></div>
+          </figure>
+          <figure class="chart" id="beta-t-figure" hidden>
+            <figcaption>β über der Zeit t in S (<span id="beta-t-curve"></span>)</figcaption>
+            <canvas id="beta-t-graph" aria-label="Graph von β über der Zeit während der Beschleunigungsphase"></canvas>
+            <div class="chart-tip" id="beta-t-tip" hidden></div>
+          </figure>
         </section>
 
         <section>

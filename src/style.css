@@ -72,9 +72,11 @@ button {
 }
 button:hover { border-color: var(--accent); }
 
-#debug { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; }
-#debug td { padding: 1px 0; vertical-align: top; }
-#debug td:last-child { text-align: right; white-space: nowrap; padding-left: 8px; }
+#debug { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 12px; table-layout: fixed; }
+#debug td { padding: 1px 0; vertical-align: top; overflow-wrap: anywhere; }
+#debug td:first-child { width: 56%; }
+#debug td.sub { padding-left: 12px; color: var(--muted); }
+#debug td:last-child { text-align: right; padding-left: 8px; }
 
 #footer {
   flex: none; font-size: 12px; color: var(--muted);
@@ -85,4 +87,15 @@ button:hover { border-color: var(--accent); }
   #app { flex-direction: column; }
   #view { flex: 1 1 55%; }
   #panel { width: 100%; flex: 1 1 45%; border-left: none; border-top: 1px solid var(--border); }
+}
+
+#acc-a, #acc-duration, #acc-play { width: 78px; }
+
+.chart { position: relative; margin: 6px 0 12px; }
+.chart figcaption { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+.chart canvas { display: block; width: 100%; height: 150px; }
+.chart-tip {
+  position: absolute; pointer-events: none; font-size: 11px; white-space: nowrap;
+  background: #0e1118; color: var(--text); border: 1px solid var(--border);
+  border-radius: 4px; padding: 2px 6px; font-variant-numeric: tabular-nums;
 }

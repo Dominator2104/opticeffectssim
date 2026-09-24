@@ -468,6 +468,52 @@ export function betaSmooth(t, T, betaEnd) {
   return betaEnd * u * u * (3 - 2 * u);
 }
 
+/** Die drei wählbaren Kurven der Beschleunigungsphase. */
+export const ACCELERATION_CURVES = {
+  constant: 'konstante Eigenbeschleunigung',
+  linear: 'linear in β (didaktisch)',
+  smooth: 'weiche Ein-/Ausblendkurve (didaktisch)',
+};
+
+/**
+ * β zur Zeit t (in S) für die gewählte Kurve.
+ * Damit die drei Kurven vergleichbar sind, laufen "linear" und "smooth" über
+ * dieselbe Dauer T bis zum selben End-β wie die konstante Eigenbeschleunigung:
+ *   β_end = β_konst(a, T).
+ *
+ * @param {'constant'|'linear'|'smooth'} curve
+ * @param {number} t  Zeit in S in s (0 ≤ t ≤ T)
+ * @param {number} a  Eigenbeschleunigung in m/s²
+ * @param {number} T  Dauer der Beschleunigungsphase in S in s
+ */
+export function accelerationBeta(curve, t, a, T) {
+  if (curve === 'constant') return betaConstantProperAcceleration(a, Math.min(t, T));
+  const betaEnd = betaConstantProperAcceleration(a, T);
+  if (curve === 'linear') return betaLinear(t, T, betaEnd);
+  return betaSmooth(t, T, betaEnd);
+}
+
+/**
+ * Eigenzeit an Bord für eine beliebige Kurve β(t), numerisch:
+ *
+ *   τ = ∫₀ᵗ √(1 − β(t')²) dt' = ∫₀ᵗ dt'/γ
+ *
+ * (Zeitdilatation; Simpson-Regel mit n Teilintervallen, n gerade.)
+ * Für die konstante Eigenbeschleunigung stimmt das mit der geschlossenen Form
+ * properTimeConstantAcceleration() überein (getestet).
+ */
+export function properTimeNumeric(betaOfT, t, n = 400) {
+  if (t <= 0) return 0;
+  const h = t / n;
+  const f = (s) => {
+    const b = betaOfT(s);
+    return Math.sqrt(1 - b * b);
+  };
+  let sum = f(0) + f(t);
+  for (let i = 1; i < n; i++) sum += (i % 2 === 1 ? 4 : 2) * f(i * h);
+  return (sum * h) / 3;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Hilfsfunktionen                                                           */
 /* ------------------------------------------------------------------------- */

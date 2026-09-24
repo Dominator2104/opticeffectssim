@@ -39,6 +39,8 @@ import {
   properTimeConstantAcceleration,
   betaLinear,
   betaSmooth,
+  accelerationBeta,
+  properTimeNumeric,
 } from '../src/physics.js';
 
 /** Reproduzierbarer Zufallsgenerator (mulberry32), damit Tests deterministisch sind. */
@@ -295,6 +297,31 @@ describe('Weitere Selbsttests', () => {
         prev = b;
       }
     }
+  });
+
+  it('Kurvenwahl: alle drei Kurven starten bei 0 und enden beim selben β', () => {
+    const a = 9.81;
+    const T = 5 * 365.25 * 86400;
+    const end = betaConstantProperAcceleration(a, T);
+    for (const curve of ['constant', 'linear', 'smooth']) {
+      expect(accelerationBeta(curve, 0, a, T)).toBe(0);
+      expect(accelerationBeta(curve, T, a, T)).toBeCloseTo(end, 12);
+    }
+  });
+
+  it('Eigenzeit numerisch = geschlossene Form bei konstanter Eigenbeschleunigung', () => {
+    const a = 9.81;
+    for (const t of [1e6, 3.15e7, 1.6e8]) {
+      const numeric = properTimeNumeric((s) => betaConstantProperAcceleration(a, s), t);
+      expect(numeric / properTimeConstantAcceleration(a, t)).toBeCloseTo(1, 8);
+    }
+  });
+
+  it('Fenster ±16°: Licht stammt aus einem größeren Himmelsbereich in S', () => {
+    // Umkehrung der Aberration: ψ' = 16° kommt bei β = 0,9 aus ψ ≈ 59° in S
+    const psi = deg(Math.acos(inverseAberrationCosPsi(0.9, Math.cos(rad(16)))));
+    expect(psi).toBeGreaterThan(16);
+    expect(deg(aberrationPsi(0.9, rad(psi)))).toBeCloseTo(16, 9);
   });
 
   it('β ≥ 1 wird abgelehnt', () => {
