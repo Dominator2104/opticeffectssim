@@ -34,6 +34,52 @@ schreibt die Vite-Konfiguration das gebündelte JavaScript direkt in die
 HTML-Datei (Browser laden JavaScript-Module nicht über `file://`). Zur Laufzeit
 wird nichts aus dem Netz geladen; three.js ist mitgebündelt.
 
+## Container (GitHub-Paket)
+
+Bei jedem Push auf `main` (oder manuell unter *Actions → Container-Image
+veröffentlichen → Run workflow*) testet und baut der Workflow
+`.github/workflows/container.yml` das Image und veröffentlicht es in der GitHub
+Container Registry:
+
+```
+ghcr.io/dominator2104/opticeffectssim:latest        # immer der neueste Stand von main
+ghcr.io/dominator2104/opticeffectssim:sha-<commit>  # fester Stand
+```
+
+Der Container liefert die Simulation mit nginx (ohne root-Rechte) auf
+**Port 5000** aus, für `linux/amd64` und `linux/arm64`. `/healthz` antwortet
+mit `ok` und wird vom `HEALTHCHECK` benutzt. Das Cockpit-Bild ist nicht
+enthalten (`.dockerignore`); im Container erscheint der Platzhalter, „Bild
+wählen…“ funktioniert.
+
+Beispiel für einen Docker-Stack hinter einem vorhandenen nginx (kein Port nach
+außen nötig, nginx und Dienst im selben Netzwerk):
+
+```yaml
+services:
+  opticeffectssim:
+    image: ghcr.io/dominator2104/opticeffectssim:latest
+    networks: [proxy]
+    deploy:
+      restart_policy:
+        condition: any
+networks:
+  proxy:
+    external: true
+```
+
+```nginx
+location /simulation/ {
+    proxy_pass http://opticeffectssim:5000/;
+}
+```
+
+Die Seite verwendet nur relative Pfade und bettet alles in `index.html` ein,
+sie läuft daher unter jedem Unterpfad.
+
+Lokal ausprobieren: `docker build -t opticeffectssim . && docker run -p 5000:5000 opticeffectssim`,
+dann http://localhost:5000 öffnen.
+
 ## Konventionen (aus Kapitel 3 der Seminararbeit)
 
 | Größe | Bedeutung |
@@ -195,6 +241,9 @@ Ausdrücklich nicht enthalten: gekrümmte Raumzeit, Überlichtgeschwindigkeit,
 ```
 index.html
 vite.config.js      base './', Einbetten für den Build ohne Server
+Dockerfile          Container-Image (nginx, Port 5000)
+docker/nginx.conf   nginx-Konfiguration im Container
+.github/workflows/  container.yml: Image bauen und veröffentlichen
 src/
   main.js           Aufbau, Animationsschleife, Debug-Werte
   physics.js        alle Formeln als reine Funktionen, ausführlich kommentiert
