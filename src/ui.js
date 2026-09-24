@@ -51,6 +51,10 @@ export function createUI(state, { onStarCount }) {
   input.addEventListener('change', () => setBeta(Number(input.value.replace(',', '.')), 'input'));
 
   bindCheckbox('fx-aberration', (v) => (state.aberration = v));
+  bindCheckbox('fx-doppler', (v) => (state.doppler = v));
+  bindCheckbox('fx-beaming', (v) => (state.beaming = v));
+  bindCheckbox('fx-visible', (v) => (state.visibleOnly = v));
+  bindCheckbox('fx-bands', (v) => (state.markBands = v));
   $('projection').addEventListener('change', (e) => (state.projection = e.target.value));
   bindRange('fov', 'fov-out', (v) => (state.fovDeg = v), 0);
   bindRange('exposure', 'exposure-out', (v) => (state.exposureMag = v), 1);

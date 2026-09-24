@@ -18,6 +18,7 @@
  *   2. Dieses Bild einmal nach sRGB umrechnen und auf den Bildschirm bringen.
  */
 import * as THREE from 'three';
+import { buildBlackbodyTable, visibleLuminance, TABLE_SIZE, TABLE_T_MIN, TABLE_T_MAX } from './blackbody.js';
 
 /* ------------------------------------------------------------------------- */
 /* Gemeinsamer Shader-Code                                                   */
@@ -47,6 +48,64 @@ float dopplerFactor(float cosPsi) {
 vec3 aberrateDirection(vec3 n) {
   float D = dopplerFactor(n.z);
   return vec3(D * n.xy, (n.z + uBeta) / (1.0 + uBeta * n.z));
+}
+
+// physics.apparentTemperature(T, D):
+//   T' = T / D     (Wiensches Verschiebungsgesetz; nach vorn D < 1, also T' > T)
+float apparentTemperature(float T, float D) {
+  return T / D;
+}
+
+// physics.beamingPointSource(D):
+//   F'/F = D^(−2)   für PUNKTFÖRMIGE Quellen (Sterne)
+//   (Weiskopf u. a. 1999, S. 283, Gl. (14), (15); Kraus 2000, S. 56)
+float beamingPointSource(float D) {
+  return 1.0 / (D * D);
+}
+
+// physics.beamingExtended(D):
+//   L'/L = D^(−4)   nur für AUSGEDEHNTE Flächen (Würfel, Kugel), nie für Sterne
+float beamingExtended(float D) {
+  float D2 = D * D;
+  return 1.0 / (D2 * D2);
+}
+`;
+
+/**
+ * Zugriff auf die Schwarzkörper-Tabelle aus blackbody.js (als Textur).
+ * RGB: Farbton (größter Kanal = 1, linear), A: log10 Y(T) − log10 Y(5800 K).
+ */
+export const GLSL_BLACKBODY = /* glsl */ `
+uniform sampler2D uBlackbody;
+uniform float uLogTMin;   // log10 der kleinsten Tabellentemperatur
+uniform float uLogTMax;   // log10 der größten Tabellentemperatur
+uniform float uTableSize;
+const float INV_LN10 = 0.43429448190325176;
+
+vec4 blackbodyLookup(float T) {
+  float u = clamp((log(T) * INV_LN10 - uLogTMin) / (uLogTMax - uLogTMin), 0.0, 1.0);
+  return texture(uBlackbody, vec2((u * (uTableSize - 1.0) + 0.5) / uTableSize, 0.5));
+}
+
+// log10 der sichtbaren Helligkeit Y(T) (bis auf eine Konstante).
+// Oberhalb der Tabelle gilt Rayleigh-Jeans: B_λ ∝ T, also Y ∝ T.
+float log10VisibleLuminance(float T) {
+  float logT = log(T) * INV_LN10;
+  return blackbodyLookup(T).a + max(logT - uLogTMax, 0.0);
+}
+
+// physics.visibleSpectralFactor(T, T', Y(T), Y(T')):
+//   Y(T')/Y(T) · (T/T')⁴  — Änderung des Anteils der Strahlung im Sichtbaren.
+//   Zusammen mit D^(−2) ergibt das die sichtbare Helligkeit D²·Y(T')/Y(T).
+float visibleSpectralFactor(float T, float Tprime) {
+  float logRatio = log10VisibleLuminance(Tprime) - log10VisibleLuminance(T)
+                 + 4.0 * (log(T / Tprime) * INV_LN10);
+  return pow(10.0, logRatio);
+}
+
+// physics.wienPeakWavelengthNm(T): λ_max = b/T, b = 2,897771955·10⁻³ m·K
+float wienPeakWavelengthNm(float T) {
+  return 2.897771955e6 / T;
 }
 `;
 
@@ -101,43 +160,98 @@ const STAR_DISTANCE = 1.0e6;
 
 const STAR_VERTEX = /* glsl */ `
 ${GLSL_PHYSICS}
+${GLSL_BLACKBODY}
 ${GLSL_PROJECTION}
 uniform bool uAberration;
+uniform bool uDoppler;
+uniform bool uBeaming;
+uniform bool uVisibleOnly; // Helligkeit nur aus dem sichtbaren Spektralanteil
+uniform bool uMarkBands;   // Sterne mit Strahlungsmaximum in UV/IR kennzeichnen
 uniform float uExposure;   // Belichtung: Faktor, mit dem F multipliziert wird (Darstellung)
 uniform float uBaseSize;   // Punktgröße eines gerade sichtbaren Sterns in Pixeln
 uniform float uMaxSize;    // größte Punktgröße in Pixeln (Bildschirm ist nicht beliebig hell)
+uniform float uMarkSize;   // Größe der UV/IR-Markierung in Pixeln
 uniform float uPixelRatio;
 
 in float aFlux;            // Grundhelligkeit F relativ zu 0 mag (stars.js)
+in float aTemperature;     // Temperatur T des Sterns in S (stars.js)
+out vec3 vColor;
 out float vIntensity;
+out float vCoreFraction;   // Anteil des Lichtflecks an der Punktgröße
+out float vMark;           // 0 = keine Markierung, 1 = UV (Ring), 2 = IR (Quadrat)
+out float vSpritePx;
 
 void main() {
   vec3 n = normalize(position);                 // Richtung zum Stern in S
   vec3 nSeen = uAberration ? aberrateDirection(n) : n;
   gl_Position = projectDirection(nSeen, ${STAR_DISTANCE.toFixed(1)});
 
+  // D gehört zur tatsächlichen Richtung n in S (cos ψ = n.z), unabhängig davon,
+  // ob die Aberration gerade angezeigt wird.
+  float D = dopplerFactor(n.z);
+
+  // Farbe: Schwarzkörper bei der scheinbaren Temperatur T' = T/D (Doppler an)
+  float T = aTemperature;
+  float Tseen = uDoppler ? apparentTemperature(T, D) : T;
+  vColor = blackbodyLookup(Tseen).rgb;
+
+  // Helligkeit: Sterne sind Punkte → D^(−2), nicht D^(−4)!
+  float flux = aFlux;
+  if (uBeaming) flux *= beamingPointSource(D);
+  if (uVisibleOnly) flux *= visibleSpectralFactor(T, Tseen);
+
   // Darstellung eines Punktes (keine Physik): Die Bildschirmhelligkeit ist
   // "Fläche × Leuchtdichte" des Lichtflecks. Bis Intensität 1 wird nur die
   // Leuchtdichte erhöht, darüber wächst die Fläche proportional zu F, bis
-  // uMaxSize erreicht ist.
-  float b = aFlux * uExposure;
-  float size = uBaseSize * sqrt(max(b, 1.0));
-  vIntensity = min(b, 1.0);
-  gl_PointSize = min(size, uMaxSize) * uPixelRatio;
+  // uMaxSize erreicht ist. Die Division durch die Leuchtdichte des Farbtons
+  // sorgt dafür, dass Sterne gleicher Bestrahlungsstärke gleich hell wirken,
+  // egal welche Farbe sie haben.
+  float colorLuminance = max(dot(vColor, vec3(0.2126, 0.7152, 0.0722)), 1.0e-3);
+  float e = flux * uExposure / colorLuminance;
+  float core = min(uBaseSize * sqrt(max(e, 1.0)), uMaxSize);
+  vIntensity = min(e, 1.0);
+
+  // Kennzeichnung: Strahlungsmaximum λ_max = b/T' außerhalb 380–780 nm
+  // (nur bei Sternen, die überhaupt sichtbar sind)
+  vMark = 0.0;
+  float lambdaMax = wienPeakWavelengthNm(Tseen);
+  if (uMarkBands && e >= 1.0) {
+    if (lambdaMax < 380.0) vMark = 1.0;
+    else if (lambdaMax > 780.0) vMark = 2.0;
+  }
+  float sprite = vMark > 0.0 ? max(core, uMarkSize) : core;
+  vCoreFraction = core / sprite;
+  vSpritePx = sprite * uPixelRatio;
+  gl_PointSize = vSpritePx;
 }
 `;
 
 const STAR_FRAGMENT = /* glsl */ `
 precision highp float;
+in vec3 vColor;
 in float vIntensity;
+in float vCoreFraction;
+in float vMark;
+in float vSpritePx;
 out vec4 fragColor;
 void main() {
+  vec2 p = gl_PointCoord * 2.0 - 1.0;   // −1 … 1 über den ganzen Punkt
+  vec3 col = vec3(0.0);
+
   // runder Lichtfleck mit gaußförmigem Abfall (Beugungsscheibchen einer Kamera)
-  vec2 p = gl_PointCoord * 2.0 - 1.0;
-  float r2 = dot(p, p);
-  if (r2 > 1.0 || vIntensity < 0.004) discard;
-  float g = exp(-4.0 * r2);
-  fragColor = vec4(vec3(vIntensity * g), 1.0);
+  vec2 q = p / vCoreFraction;
+  float r2 = dot(q, q);
+  if (r2 < 1.0) col += vColor * vIntensity * exp(-4.0 * r2);
+
+  // UV: Ring, IR: Quadrat — dünne Umrisslinie in der Farbe des Sterns
+  if (vMark > 0.5) {
+    float px = 2.0 / vSpritePx;           // ein Pixel in Einheiten von p
+    float edge = 1.0 - 1.5 * px;
+    float d = vMark < 1.5 ? abs(length(p) - edge) : abs(max(abs(p.x), abs(p.y)) - edge);
+    col += vColor * 0.45 * (1.0 - smoothstep(0.5 * px, 1.2 * px, d));
+  }
+  if (max(col.r, max(col.g, col.b)) < 1.0e-3) discard;
+  fragColor = vec4(col, 1.0);
 }
 `;
 
@@ -191,6 +305,30 @@ void main() {
 }
 `;
 
+/**
+ * Schwarzkörper-Tabelle aus blackbody.js als 1D-Textur (1024 × 1 Texel).
+ * Halbgenaue Gleitkommazahlen sind in WebGL 2 immer linear filterbar. Damit
+ * die Genauigkeit reicht, wird log10 Y relativ zu Y(5800 K) gespeichert.
+ */
+function createBlackbodyTexture() {
+  const table = buildBlackbodyTable(TABLE_SIZE);
+  const logYRef = Math.log10(visibleLuminance(5800));
+  const half = new Uint16Array(table.length);
+  for (let i = 0; i < table.length; i++) {
+    const v = i % 4 === 3 ? table[i] - logYRef : table[i];
+    half[i] = THREE.DataUtils.toHalfFloat(v);
+  }
+  const tex = new THREE.DataTexture(half, TABLE_SIZE, 1, THREE.RGBAFormat, THREE.HalfFloatType);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.generateMipmaps = false;
+  tex.colorSpace = THREE.NoColorSpace; // Werte sind bereits linear
+  tex.needsUpdate = true;
+  return tex;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Öffentliche Schnittstelle                                                 */
 /* ------------------------------------------------------------------------- */
@@ -232,10 +370,19 @@ export function createRenderer(canvas) {
     uStereoScale: { value: 1 },
     uAspect: { value: 1 },
     uAberration: { value: true },
+    uDoppler: { value: true },
+    uBeaming: { value: true },
+    uVisibleOnly: { value: false },
+    uMarkBands: { value: false },
     uExposure: { value: 1 },
     uBaseSize: { value: 2.0 },
     uMaxSize: { value: 24.0 },
+    uMarkSize: { value: 11.0 },
     uPixelRatio: { value: renderer.getPixelRatio() },
+    uBlackbody: { value: createBlackbodyTexture() },
+    uLogTMin: { value: Math.log10(TABLE_T_MIN) },
+    uLogTMax: { value: Math.log10(TABLE_T_MAX) },
+    uTableSize: { value: TABLE_SIZE },
   };
 
   const scene = new THREE.Scene();
@@ -281,13 +428,18 @@ export function createRenderer(canvas) {
   }
 
   /**
-   * @param {object} s  Zustand: beta, gamma, aberration, projection ('perspective'|'stereographic'),
+   * @param {object} s  Zustand: beta, gamma, aberration, doppler, beaming, visibleOnly, markBands,
+   *                    projection ('perspective'|'stereographic'),
    *                    fovDeg (vertikales Sichtfeld), exposure, yaw, pitch
    */
   function render(s) {
     uniforms.uBeta.value = s.beta;
     uniforms.uGamma.value = s.gamma;
     uniforms.uAberration.value = s.aberration;
+    uniforms.uDoppler.value = s.doppler;
+    uniforms.uBeaming.value = s.beaming;
+    uniforms.uVisibleOnly.value = s.visibleOnly;
+    uniforms.uMarkBands.value = s.markBands;
     uniforms.uProjection.value = s.projection === 'stereographic' ? 1 : 0;
     const halfFov = (s.fovDeg * Math.PI) / 360;
     uniforms.uFocal.value = 1 / Math.tan(halfFov);

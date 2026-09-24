@@ -33,6 +33,17 @@
         <section>
           <h2>Effekte</h2>
           <label class="check"><input id="fx-aberration" type="checkbox" checked /> Aberration (Richtung)</label>
+          <label class="check"><input id="fx-doppler" type="checkbox" checked /> Doppler-Effekt (Farbe)</label>
+          <label class="check"><input id="fx-beaming" type="checkbox" checked /> Beaming (Helligkeit, Sterne D<sup>−2</sup>)</label>
+          <label class="check"><input id="fx-visible" type="checkbox" /> Nur sichtbares Licht (380–780 nm)</label>
+          <p class="note indent">Aus: Helligkeit über alle Wellenlängen (bolometrisch).
+            An: nur der Anteil des verschobenen Spektrums, den das Auge sieht.</p>
+          <label class="check"><input id="fx-bands" type="checkbox" /> Maximum außerhalb des Sichtbaren kennzeichnen</label>
+          <p class="note indent"><span class="sym">◯</span> Ring: λ<sub>max</sub> &lt; 380 nm (UV) ·
+            <span class="sym">□</span> Quadrat: λ<sub>max</sub> &gt; 780 nm (IR), nach Wien λ<sub>max</sub> = b/T′</p>
+          <p class="note footnote">* Bei großem β wandert sichtbares Licht ins UV und Infrarotes ins
+            Sichtbare. Gezeigt wird die Farbe des verschobenen Schwarzkörpers (T′ = T/D); das ist
+            korrekt, solange man das Sternspektrum als vollständiges Planck-Spektrum annimmt.</p>
         </section>
 
         <section>
@@ -45,8 +56,8 @@
           </label>
           <label class="row">Sichtfeld <span><output id="fov-out">60</output>°</span></label>
           <input id="fov" type="range" min="20" max="170" step="1" value="60" />
-          <label class="row">Belichtung <span><output id="exposure-out">2.0</output> mag</span></label>
-          <input id="exposure" type="range" min="-4" max="8" step="0.1" value="2" />
+          <label class="row">Belichtung <span><output id="exposure-out">4.0</output> mag</span></label>
+          <input id="exposure" type="range" min="-4" max="8" step="0.1" value="4" />
           <label class="row">Anzahl Sterne
             <select id="star-count">
               <option value="10000" selected>10 000</option>

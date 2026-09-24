@@ -280,6 +280,78 @@ export function beamingExtended(D) {
   return 1 / (D2 * D2);
 }
 
+/**
+ * Helligkeit eines punktförmigen Sterns NUR IM SICHTBAREN (380–780 nm).
+ * Umschaltbar gegen die bolometrische Helligkeit D^(−2) (Wunsch des
+ * Auftraggebers).
+ *
+ *   F'_vis / F_vis = D² · Y(T') / Y(T)       mit T' = T/D
+ *
+ * Y(T) = ∫ B_λ(λ, T) · ȳ(λ) dλ ist die sichtbare Helligkeit eines
+ * Schwarzkörpers (berechnet in blackbody.js).
+ *
+ * Herleitung: Das empfangene Spektrum ist wieder ein Planck-Spektrum, nun mit
+ * der Temperatur T' = T/D (siehe apparentTemperature). Die Bestrahlungsstärke
+ * eines Sterns ist Strahldichte × scheinbarer Raumwinkel des Sternscheibchens;
+ * der Raumwinkel ändert sich mit dΩ'/dΩ = D² (siehe solidAngleRatio). Also
+ *   F'_vis = Ω·D² · Y(T')   und   F_vis = Ω · Y(T).
+ *
+ * Probe: Über das ganze Spektrum integriert (statt nur über den sichtbaren
+ * Bereich) ist Y durch σT⁴/π zu ersetzen, und die Formel ergibt
+ *   D² · (T'/T)⁴ = D² · D^(−4) = D^(−2),
+ * also genau das bolometrische Beaming. (Getestet.)
+ *
+ * @param {number} D         Wellenlängenverhältnis
+ * @param {number} Yrest     Y(T), sichtbare Helligkeit bei der Ruhetemperatur
+ * @param {number} Yshifted  Y(T'), sichtbare Helligkeit bei der scheinbaren Temperatur
+ */
+export function beamingPointSourceVisible(D, Yrest, Yshifted) {
+  return D * D * (Yshifted / Yrest);
+}
+
+/**
+ * Zerlegung der sichtbaren Helligkeit in zwei unabhängig schaltbare Faktoren
+ * (so rechnet der Shader, damit "Doppler" und "Beaming" getrennt zuschaltbar
+ * bleiben):
+ *
+ *   D² · Y(T')/Y(T)  =  D^(−2)  ·  [ Y(T')/Y(T) · (T/T')⁴ ]
+ *                       Beaming    Spektralfaktor (Anteil im Sichtbaren)
+ *
+ * denn (T/T')⁴ = D⁴. Der Spektralfaktor ist das Verhältnis der
+ * Sichtbarkeitsanteile Y/(σT⁴/π) nach und vor der Verschiebung. Er ist 1, wenn
+ * das Spektrum nicht verschoben wird (T' = T, Doppler aus).
+ */
+export function visibleSpectralFactor(T, Tprime, Yrest, Yshifted) {
+  const r = T / Tprime;
+  return (Yshifted / Yrest) * r * r * r * r;
+}
+
+/** Wiensche Verschiebungskonstante b in m·K (CODATA 2018). */
+export const WIEN_B = 2.897771955e-3;
+
+/**
+ * Wiensches Verschiebungsgesetz: Wellenlänge des Strahlungsmaximums
+ *
+ *   λ_max = b / T
+ *
+ * @returns {number} λ_max in nm
+ */
+export function wienPeakWavelengthNm(T) {
+  return (WIEN_B / T) * 1e9;
+}
+
+/**
+ * Liegt das Strahlungsmaximum im UV, im Sichtbaren oder im IR?
+ * Grenzen 380 nm und 780 nm wie im Auftrag.
+ * @returns {'uv'|'sichtbar'|'ir'}
+ */
+export function peakBand(T) {
+  const l = wienPeakWavelengthNm(T);
+  if (l < 380) return 'uv';
+  if (l > 780) return 'ir';
+  return 'sichtbar';
+}
+
 /* ------------------------------------------------------------------------- */
 /* 4. Sterndichte und abgeleitete Kenngrößen                                 */
 /* ------------------------------------------------------------------------- */
