@@ -17,6 +17,14 @@ import {
   TABLE_SIZE,
   TABLE_T_MIN,
   TABLE_T_MAX,
+  visibleFraction,
+  trueWavelengthForDisplay,
+  falseColor,
+  buildFalseColorTable,
+  FULL_MIN_NM,
+  FULL_MAX_NM,
+  VISIBLE_FRACTION_LIMIT,
+  createVisibleLuminanceLookup,
 } from '../src/blackbody.js';
 import {
   dopplerFactorForward,
@@ -29,6 +37,7 @@ import {
   visibleSpectralFactor,
   wienPeakWavelengthNm,
   peakBand,
+  nakedEyeVisibleCount,
 } from '../src/physics.js';
 
 describe('Planck-Spektrum und CIE-Integration', () => {
@@ -140,5 +149,62 @@ describe('Helligkeit nur im Sichtbaren', () => {
     expect(peakBand(5800)).toBe('sichtbar');
     expect(peakBand(2500)).toBe('ir');
     expect(peakBand(30000)).toBe('uv');
+  });
+});
+
+describe('Gesamtes Spektrum (Falschfarben) und Sichtbarkeitsanteil', () => {
+  it('Sichtbarkeitsanteil: Sonne ≈ 47 %, < 1 % unter ≈ 1 900 K und über ≈ 60 000 K', () => {
+    expect(visibleFraction(5800)).toBeCloseTo(0.467, 2);
+    expect(visibleFraction(1800)).toBeLessThan(VISIBLE_FRACTION_LIMIT);
+    expect(visibleFraction(2000)).toBeGreaterThan(VISIBLE_FRACTION_LIMIT);
+    expect(visibleFraction(70000)).toBeLessThan(VISIBLE_FRACTION_LIMIT);
+    expect(visibleFraction(50000)).toBeGreaterThan(VISIBLE_FRACTION_LIMIT);
+  });
+
+  it('Abbildung der Wellenlängen: 380 nm ↦ 50 nm, 780 nm ↦ 20 µm, logarithmisch', () => {
+    expect(trueWavelengthForDisplay(380)).toBeCloseTo(FULL_MIN_NM, 9);
+    expect(trueWavelengthForDisplay(780)).toBeCloseTo(FULL_MAX_NM, 6);
+    expect(trueWavelengthForDisplay(580)).toBeCloseTo(Math.sqrt(FULL_MIN_NM * FULL_MAX_NM), 6);
+  });
+
+  it('Falschfarben: kühl = rot, heiß = violett/blau, in Ruhe noch unterscheidbar', () => {
+    const cold = falseColor(300);
+    const hot = falseColor(1e6);
+    expect(cold.r).toBeCloseTo(1, 12);
+    expect(cold.b).toBeLessThan(0.05);
+    expect(hot.b).toBeCloseTo(1, 12);
+    const m = falseColor(3000);
+    const b = falseColor(30000);
+    expect(Math.abs(m.r - b.r) + Math.abs(m.g - b.g) + Math.abs(m.b - b.b)).toBeGreaterThan(0.5);
+  });
+
+  it('Tabelle: richtige Länge, log10 f ≤ 0', () => {
+    const t = buildFalseColorTable(64);
+    expect(t.length).toBe(256);
+    for (let i = 0; i < 64; i++) expect(t[4 * i + 3]).toBeLessThanOrEqual(0);
+  });
+});
+
+describe('Sichtbare Sterne mit bloßem Auge', () => {
+  it('Y-Nachschlagetabelle stimmt mit der direkten Integration überein', () => {
+    const Y = createVisibleLuminanceLookup();
+    for (const T of [700, 2500, 5800, 30000, 300000]) {
+      expect(Y(T) / visibleLuminance(T)).toBeCloseTo(1, 3);
+    }
+  });
+
+  it('β = 0: alle Sterne bis 6,5 mag sichtbar; nach vorn bleiben helle sichtbar, nach hinten werden sie unsichtbar', () => {
+    const Y = createVisibleLuminanceLookup();
+    // zwei 5 800-K-Sterne mit 6,0 mag: vorn und hinten
+    const F = 10 ** (-0.4 * 6.0);
+    const stars = {
+      count: 2,
+      directions: new Float32Array([0, 0, 1, 0, 0, -1]),
+      temperatures: new Float32Array([5800, 5800]),
+      fluxes: new Float32Array([F, F]),
+    };
+    expect(nakedEyeVisibleCount(stars, 0, Y)).toEqual({ visible: 2, invisible: 0 });
+    // vorn: sichtbare Helligkeit × 2,6 (heller), hinten: stark gedämpft
+    expect(nakedEyeVisibleCount(stars, 0.9, Y)).toEqual({ visible: 1, invisible: 1 });
   });
 });

@@ -134,3 +134,32 @@ export function bodyCenter(psi, phi, distance, observerZ) {
     distance * Math.cos(psi) - observerZ,
   ];
 }
+
+/**
+ * Die 12 Kanten eines Würfels (Kantenlänge size) als Liniensegmente, jede
+ * Kante in segments Stücke geteilt (die stereografische Projektion biegt
+ * gerade Linien, deshalb fein unterteilt). Für den Vergleichswürfel.
+ */
+export function createCubeEdges(size = 2, segments = 32) {
+  const h = size / 2;
+  const corners = [];
+  for (const x of [-h, h]) for (const y of [-h, h]) for (const z of [-h, h]) corners.push([x, y, z]);
+  const pos = [];
+  for (let i = 0; i < 8; i++) {
+    for (let j = i + 1; j < 8; j++) {
+      const a = corners[i];
+      const b = corners[j];
+      // Kante = Ecken, die sich in genau einer Koordinate unterscheiden
+      if (a.filter((v, k) => v !== b[k]).length !== 1) continue;
+      for (let s = 0; s < segments; s++) {
+        for (const t of [s / segments, (s + 1) / segments]) {
+          pos.push(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t);
+        }
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);
+  return g;
+}

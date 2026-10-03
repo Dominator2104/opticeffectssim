@@ -2,10 +2,21 @@
  * Erstellt mit Claude Code (KI-Werkzeug) im Auftrag von Dominik Wittkow,
  * W-Seminar Physik, CSG Ingolstadt, 24.09.2026.
  *
- * ui.js — Bedienelemente und Debug-Panel.
+ * ui.js — Bedienelemente, Reiter, Debug-Panel, Graphen der Simulation.
  * Physikalische Werte kommen ausschließlich aus src/physics.js.
+ *
+ * Der β-Regler und die Beschleunigungs-Einstellungen gibt es zweimal (in der
+ * Simulation und in der Übersicht). Beide schreiben in denselben Zustand und
+ * werden nach jeder Änderung gemeinsam aktualisiert.
  */
-import { lorentzGamma, accelerationBeta } from './physics.js';
+import {
+  lorentzGamma,
+  accelerationBeta,
+  accelerationDuration,
+  accelerationFromDuration,
+  ACCELERATION_CURVES,
+} from './physics.js';
+import { createLineChart, CHART } from './charts.js';
 
 /** Größtes β, das der Regler zulässt. */
 export const BETA_MAX = 0.999;
@@ -26,45 +37,221 @@ export function sliderFromBeta(beta) {
   return -Math.log10(1 - beta) / 3;
 }
 
-function clampBeta(beta) {
+export function clampBeta(beta) {
   if (!Number.isFinite(beta)) return 0;
   return Math.min(BETA_MAX, Math.max(0, beta));
 }
 
 const $ = (id) => document.getElementById(id);
+const parse = (el) => Number(String(el.value).replace(',', '.'));
+
+/* ------------------------------------------------------------------------- */
+/* Beschleunigungsphase: Dauer ↔ Eigenbeschleunigung                         */
+/* ------------------------------------------------------------------------- */
 
 /**
- * Verbindet die Bedienelemente mit dem Zustandsobjekt state.
- * onStarCount(n) wird aufgerufen, wenn die Sternzahl geändert wird.
+ * Dauer T und Eigenbeschleunigung a der Beschleunigungsphase von β₀ nach β₁.
+ * Je nach Modus ist eines vorgegeben und das andere berechnet
+ * (physics.accelerationDuration bzw. accelerationFromDuration).
+ * @returns {{T:number, a:number, valid:boolean}}
  */
-export function createUI(state, { onStarCount, onLookAt, onMeasureSphere, onManualBeta, overlay, onExport }) {
-  const slider = $('beta-slider');
-  const input = $('beta-input');
+export function accelTiming(acc) {
+  if (Math.abs(acc.beta1 - acc.beta0) < 1e-9) return { T: 0, a: 0, valid: false };
+  if (acc.mode === 'acceleration') {
+    return { T: accelerationDuration(acc.a, acc.beta0, acc.beta1), a: acc.a, valid: acc.a > 0 };
+  }
+  return { T: acc.durationS, a: accelerationFromDuration(acc.durationS, acc.beta0, acc.beta1), valid: acc.durationS > 0 };
+}
 
-  function setBeta(beta, source) {
+/** β der Beschleunigungskurve zur Zeit t (in S). */
+export function accelBetaAt(acc, t) {
+  const { T } = accelTiming(acc);
+  if (!(T > 0)) return acc.beta0;
+  return accelerationBeta(acc.curve, t, T, acc.beta0, acc.beta1);
+}
+
+const UNITS = [
+  [1, 's'],
+  [3600, 'h'],
+  [86400, 'Tage'],
+  [31557600, 'Jahre'],
+];
+
+function betaControlHtml() {
+  return `
+    <label class="row">β = v/c</label>
+    <div class="row">
+      <input data-k="slider" type="range" min="0" max="1" step="0.0001" value="0" aria-label="β-Regler" />
+      <input data-k="input" type="number" min="0" max="0.999" step="0.001" value="0" aria-label="β" />
+    </div>
+    <p class="note">Skala logarithmisch in (1 − β): feiner im oberen Bereich.</p>`;
+}
+
+function accelControlHtml(inst) {
+  const curves = Object.entries(ACCELERATION_CURVES)
+    .map(([k, v]) => `<option value="${k}">${v}</option>`)
+    .join('');
+  const units = UNITS.map(([s, n]) => `<option value="${s}">${n}</option>`).join('');
+  return `
+    <label class="row">Kurve <select data-k="curve">${curves}</select></label>
+    <div class="row"><span>Start-β</span><input data-k="beta0" type="number" min="0" max="0.999" step="0.001" /></div>
+    <div class="row"><span>End-β</span><input data-k="beta1" type="number" min="0" max="0.999" step="0.001" /></div>
+    <div class="mode-row">
+      <label><input type="radio" name="accmode-${inst}" value="acceleration" data-k="mode" /> Beschleunigung vorgeben</label>
+      <label><input type="radio" name="accmode-${inst}" value="duration" data-k="mode" /> Dauer vorgeben</label>
+    </div>
+    <label class="row">Eigenbeschleunigung a
+      <span><input data-k="a" type="number" min="0" step="any" /> m/s²</span></label>
+    <label class="row">Dauer (Zeit in S)
+      <span><input data-k="duration" type="number" min="0" step="any" /> <select data-k="unit">${units}</select></span></label>
+    <label class="row">Abspielzeit <span><input data-k="play" type="number" min="1" max="600" step="1" /> s</span></label>
+    <div class="row buttons">
+      <button type="button" data-action="start">▶ Start</button>
+      <button type="button" data-action="pause">⏸ Pause</button>
+      <button type="button" data-action="reset">⟲ Zurücksetzen</button>
+    </div>
+    <p class="note" data-k="info"></p>`;
+}
+
+/** Zahl für ein Eingabefeld (Punkt als Dezimaltrenner, ohne überflüssige Stellen). */
+function fieldNumber(x, significant = 5) {
+  return String(Number(x.toPrecision(significant)));
+}
+
+/* ------------------------------------------------------------------------- */
+/* Hauptfunktion                                                             */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Verbindet alle Bedienelemente mit dem Zustandsobjekt state.
+ * Rückgabe: { setBeta(β), refreshAccel(), setAccelInfo(text), setTerrellInfo(rows) }
+ */
+export function createUI(state, cb) {
+  const betaEls = [...document.querySelectorAll('.beta-control')].map((el) => {
+    el.innerHTML = betaControlHtml();
+    return { slider: el.querySelector('[data-k=slider]'), input: el.querySelector('[data-k=input]') };
+  });
+  const accelEls = [...document.querySelectorAll('.accel-control')].map((el) => {
+    el.innerHTML = accelControlHtml(el.dataset.instance);
+    return el;
+  });
+
+  // ---- β ----
+  function setBeta(beta, sourceEl) {
     state.beta = clampBeta(beta);
     state.gamma = lorentzGamma(state.beta);
-    if (source !== 'slider') slider.value = String(sliderFromBeta(state.beta));
-    if (source !== 'input') input.value = state.beta.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+    for (const { slider, input } of betaEls) {
+      if (slider !== sourceEl) slider.value = String(sliderFromBeta(state.beta));
+      if (input !== sourceEl) input.value = state.beta.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+    }
   }
-  // Handeingriff am Regler hält eine laufende Beschleunigungsphase an
-  slider.addEventListener('input', () => {
-    onManualBeta();
-    setBeta(betaFromSlider(Number(slider.value)), 'slider');
-  });
-  input.addEventListener('change', () => {
-    onManualBeta();
-    setBeta(Number(input.value.replace(',', '.')), 'input');
-  });
+  for (const { slider, input } of betaEls) {
+    // Handeingriff am Regler hält eine laufende Beschleunigungsphase an
+    slider.addEventListener('input', () => {
+      cb.onManualBeta();
+      setBeta(betaFromSlider(Number(slider.value)), slider);
+    });
+    input.addEventListener('change', () => {
+      cb.onManualBeta();
+      setBeta(parse(input), input);
+    });
+  }
 
-  setupAcceleration(state);
+  // ---- Beschleunigungsphase ----
+  const acc = state.accel;
+  /** Berechnete Größe neu bestimmen und alle Instanzen der Bedienelemente aktualisieren. */
+  function refreshAccel(sourceEl) {
+    const { T, a, valid } = accelTiming(acc);
+    if (valid) {
+      if (acc.mode === 'acceleration') acc.durationS = T;
+      else acc.a = a;
+    }
+    for (const el of accelEls) {
+      const f = (k) => el.querySelector(`[data-k=${k}]`);
+      const set = (k, v) => {
+        const e = f(k);
+        if (e !== sourceEl && String(e.value) !== v) e.value = v;
+      };
+      set('curve', acc.curve);
+      set('beta0', String(acc.beta0));
+      set('beta1', String(acc.beta1));
+      for (const r of el.querySelectorAll('[data-k=mode]')) r.checked = r.value === acc.mode;
+      set('unit', String(acc.unitS));
+      set('a', valid ? fieldNumber(acc.a) : '–');
+      set('duration', valid ? fieldNumber(acc.durationS / acc.unitS) : '–');
+      set('play', String(acc.playSeconds));
+      // berechnete Größe nur anzeigen, nicht eingeben
+      f('a').readOnly = acc.mode !== 'acceleration';
+      f('duration').readOnly = acc.mode !== 'duration';
+      el.querySelector('[data-action=start]').disabled = !valid;
+    }
+  }
+  for (const el of accelEls) {
+    const f = (k) => el.querySelector(`[data-k=${k}]`);
+    const on = (k, ev, fn) => f(k).addEventListener(ev, (e) => {
+      fn(e.target);
+      refreshAccel(e.target);
+    });
+    on('curve', 'change', (t) => (acc.curve = t.value));
+    on('beta0', 'change', (t) => (acc.beta0 = clampBeta(parse(t))));
+    on('beta1', 'change', (t) => (acc.beta1 = clampBeta(parse(t))));
+    for (const r of el.querySelectorAll('[data-k=mode]')) {
+      r.addEventListener('change', () => {
+        acc.mode = r.value;
+        refreshAccel(null);
+      });
+    }
+    on('a', 'change', (t) => {
+      const v = parse(t);
+      if (v > 0) acc.a = Math.min(1e9, v);
+    });
+    on('duration', 'change', (t) => {
+      const v = parse(t);
+      if (v > 0) acc.durationS = v * acc.unitS;
+    });
+    on('unit', 'change', (t) => {
+      acc.unitS = Number(t.value);
+      acc.unitName = t.selectedOptions[0].textContent;
+    });
+    on('play', 'change', (t) => (acc.playSeconds = Math.min(600, Math.max(1, parse(t) || 20))));
+    el.querySelector('[data-action=start]').addEventListener('click', () => cb.onAccelStart());
+    el.querySelector('[data-action=pause]').addEventListener('click', () => (acc.running = false));
+    el.querySelector('[data-action=reset]').addEventListener('click', () => {
+      acc.running = false;
+      acc.active = false;
+      acc.t = 0;
+    });
+  }
 
+  // ---- Reiter ----
+  for (const btn of document.querySelectorAll('#tabs button')) {
+    btn.addEventListener('click', () => {
+      for (const b of document.querySelectorAll('#tabs button')) b.setAttribute('aria-selected', String(b === btn));
+      $('app').hidden = btn.dataset.tab !== 'sim';
+      $('overview').hidden = btn.dataset.tab !== 'overview';
+      state.tab = btn.dataset.tab;
+      cb.onTab(state.tab);
+    });
+  }
+
+  // ---- Effekte ----
   bindCheckbox('fx-aberration', (v) => (state.aberration = v));
   bindCheckbox('fx-doppler', (v) => (state.doppler = v));
   bindCheckbox('fx-beaming', (v) => (state.beaming = v));
-  bindCheckbox('fx-visible', (v) => (state.visibleOnly = v));
-  bindCheckbox('fx-bands', (v) => (state.markBands = v));
+  for (const r of document.querySelectorAll('input[name=spectrum]')) {
+    const apply = () => {
+      if (!r.checked) return;
+      state.spectrum = r.value;
+      $('spectrum-note-visible').hidden = r.value !== 'visible';
+      $('spectrum-note-full').hidden = r.value !== 'full';
+    };
+    r.addEventListener('change', apply);
+    apply();
+  }
   bindCheckbox('fx-window', (v) => (state.windowMarker = v));
+
+  // ---- Cockpit ----
+  const overlay = cb.overlay;
   bindCheckbox('fx-cockpit', (v) => {
     overlay.setVisible(v);
     $('cockpit-panel').classList.toggle('hidden', !v);
@@ -79,91 +266,76 @@ export function createUI(state, { onStarCount, onLookAt, onMeasureSphere, onManu
     if ($('cockpit-status').textContent !== t) $('cockpit-status').textContent = t;
   }, 300);
 
+  // ---- Standbild ----
   $('export-png').addEventListener('click', async () => {
     $('export-status').textContent = 'Speichere …';
     try {
-      const msg = await onExport($('export-caption').checked);
-      $('export-status').textContent = msg;
+      $('export-status').textContent = await cb.onExport($('export-caption').checked);
     } catch (e) {
       $('export-status').textContent = `Fehler: ${e.message}`;
     }
   });
+
+  // ---- Terrell-Körper ----
+  const bodies = state.bodies;
   bindCheckbox('fx-bodies', (v) => {
-    state.bodies.enabled = v;
+    bodies.enabled = v;
     $('bodies-panel').classList.toggle('hidden', !v);
   });
-  bindCheckbox('body-cube', (v) => (state.bodies.showCube = v));
-  bindCheckbox('body-sphere', (v) => (state.bodies.showSphere = v));
-  bindCheckbox('body-uniform', (v) => (state.bodies.uniformTemperature = v));
-  bindRange('body-psi', 'body-psi-out', (v) => (state.bodies.psi = (v * Math.PI) / 180), 0);
-  bindRange('body-dist', 'body-dist-out', (v) => (state.bodies.distance = v), 1);
-  bindRange('body-z', 'body-z-out', (v) => (state.bodies.observerZ = v), 1);
-  bindRange('body-exp', 'body-exp-out', (v) => (state.bodies.exposureMag = v), 1);
-  $('look-cube').addEventListener('click', () => onLookAt('cube'));
-  $('look-sphere').addEventListener('click', () => onLookAt('sphere'));
+  bindCheckbox('body-cube', (v) => (bodies.showCube = v));
+  bindCheckbox('body-sphere', (v) => (bodies.showSphere = v));
+  bindCheckbox('body-uniform', (v) => (bodies.uniformTemperature = v));
+  bindCheckbox('body-ghost', (v) => (bodies.ghost = v));
+  $('body-placement').addEventListener('change', (e) => {
+    bodies.placement = e.target.value;
+    $('body-angle-label').textContent = bodies.placement === 'seen' ? 'Gesehener Winkel ψ′' : 'Winkel ψ in S';
+  });
+  bindRange('body-angle', 'body-angle-out', (v) => (bodies.angleDeg = v), 0);
+  bindRange('body-dist', 'body-dist-out', (v) => (bodies.distance = v), 1);
+  bindRange('body-z', 'body-z-out', (v) => (bodies.observerZ = v), 1);
+  bindRange('body-exp', 'body-exp-out', (v) => (bodies.exposureMag = v), 1);
+  $('look-cube').addEventListener('click', () => cb.onLookAt('cube'));
+  $('look-sphere').addEventListener('click', () => cb.onLookAt('sphere'));
+  $('flyby').addEventListener('click', () => cb.onFlyby());
   $('measure-sphere').addEventListener('click', () => {
-    const r = onMeasureSphere();
+    const r = cb.onMeasureSphere();
     $('measure-result').textContent = r
       ? `Achsenverhältnis ${r.ratio.toFixed(4)} bei β = ${state.beta.toFixed(4)}, ` +
         `Radius ${r.radiusPx.toFixed(0)} px (${r.projection}).`
       : 'Kugel nicht vollständig im Bild — erst „Blick auf Kugel“.';
   });
 
+  // ---- Ansicht ----
   $('projection').addEventListener('change', (e) => (state.projection = e.target.value));
   bindRange('fov', 'fov-out', (v) => (state.fovDeg = v), 0);
   bindRange('exposure', 'exposure-out', (v) => (state.exposureMag = v), 1);
-  $('star-count').addEventListener('change', (e) => onStarCount(Number(e.target.value)));
+  $('star-count').addEventListener('change', (e) => cb.onStarCount(Number(e.target.value)));
 
   setupLookAround($('canvas'), state);
   setBeta(state.beta);
+  refreshAccel(null);
 
-  return { setBeta };
+  return {
+    setBeta,
+    refreshAccel,
+    setAccelInfo(text) {
+      for (const el of accelEls) {
+        const p = el.querySelector('[data-k=info]');
+        if (p.textContent !== text) p.textContent = text;
+      }
+    },
+    setFlybyRunning(running) {
+      $('flyby').textContent = running ? '⏹ Vorbeiflug stoppen' : '▶ Vorbeiflug';
+    },
+    setTerrellInfo(rows) {
+      fillTable($('terrell-info'), rows);
+    },
+  };
 }
 
-/**
- * Bedienelemente der Beschleunigungsphase. Der eigentliche Ablauf (Zeit
- * weiterzählen, β setzen) steht in main.js; hier wird nur state.accel gesetzt.
- */
-function setupAcceleration(state) {
-  const acc = state.accel;
-  const aInput = $('acc-a');
-  const aSlider = $('acc-a-slider');
-  const readDuration = () => {
-    const v = Number($('acc-duration').value.replace(',', '.'));
-    acc.durationS = Math.max(1e-3, v || 1) * Number($('acc-unit').value);
-    acc.unitS = Number($('acc-unit').value);
-    acc.unitName = $('acc-unit').selectedOptions[0].textContent;
-  };
-  const setA = (a, source) => {
-    acc.a = Math.min(1e6, Math.max(0.01, a || 9.81));
-    if (source !== 'input') aInput.value = String(Number(acc.a.toPrecision(4)));
-    // logarithmischer Regler: Stellung = log10(a)
-    if (source !== 'slider') aSlider.value = String(Math.log10(acc.a));
-  };
-  $('acc-curve').addEventListener('change', (e) => (acc.curve = e.target.value));
-  aInput.addEventListener('change', () => setA(Number(aInput.value.replace(',', '.')), 'input'));
-  aSlider.addEventListener('input', () => setA(Math.pow(10, Number(aSlider.value)), 'slider'));
-  $('acc-duration').addEventListener('change', readDuration);
-  $('acc-unit').addEventListener('change', readDuration);
-  $('acc-play').addEventListener('change', (e) => {
-    acc.playSeconds = Math.min(600, Math.max(1, Number(e.target.value) || 20));
-  });
-  $('acc-start').addEventListener('click', () => {
-    if (acc.t >= acc.durationS) acc.t = 0; // am Ende: von vorn
-    acc.active = true;
-    acc.running = true;
-  });
-  $('acc-pause').addEventListener('click', () => (acc.running = false));
-  $('acc-reset').addEventListener('click', () => {
-    acc.running = false;
-    acc.active = false;
-    acc.t = 0;
-  });
-  acc.curve = $('acc-curve').value;
-  setA(Number(aInput.value));
-  readDuration();
-  acc.playSeconds = Number($('acc-play').value);
-}
+/* ------------------------------------------------------------------------- */
+/* Hilfsfunktionen                                                           */
+/* ------------------------------------------------------------------------- */
 
 /** Zeit in s → Text in der gewählten Einheit. */
 export function formatTime(seconds, unitS, unitName) {
@@ -172,6 +344,7 @@ export function formatTime(seconds, unitS, unitName) {
 
 /** Zahl mit deutscher Schreibweise und sinnvoller Stellenzahl. */
 export function formatNumber(x, significant = 4) {
+  if (!Number.isFinite(x)) return '–';
   if (x === 0) return '0';
   if (Math.abs(x) >= 1e6 || Math.abs(x) < 1e-3) {
     const [m, e] = x.toExponential(significant - 1).split('e');
@@ -234,18 +407,13 @@ function setupLookAround(canvas, state) {
   });
 }
 
-/**
- * Debug-Panel: Tabelle mit Beschriftung, Wert und Einheit.
- * rows: Array von [Beschriftung, Text].
- */
-export function updateDebug(rows) {
-  const table = $('debug');
+/** Zweispaltige Tabelle [Beschriftung, Wert]; führende Leerzeichen = eingerückte Unterzeile. */
+function fillTable(table, rows) {
   if (table.rows.length !== rows.length) {
     table.innerHTML = rows.map(() => '<tr><td></td><td></td></tr>').join('');
   }
   rows.forEach(([label, value], i) => {
     const cells = table.rows[i].cells;
-    // führende Leerzeichen = eingerückte Unterzeile
     const text = label.trimStart();
     if (cells[0].textContent !== text) {
       cells[0].textContent = text;
@@ -255,180 +423,80 @@ export function updateDebug(rows) {
   });
 }
 
+/** Debug-Panel: Tabelle mit Beschriftung und Wert (mit Einheit). */
+export function updateDebug(rows) {
+  fillTable($('debug'), rows);
+}
+
 /* ------------------------------------------------------------------------- */
-/* Graphen: γ über β und β über t                                            */
+/* Graphen der Simulation: γ über β und β über t                             */
 /* ------------------------------------------------------------------------- */
-
-// Farben der Graphen (dunkles Panel). Linienfarbe mit dem Farbprüfskript der
-// Diagramm-Richtlinien geprüft (Helligkeitsband und Kontrast ≥ 3:1 auf #151922).
-const CHART = {
-  surface: '#151922',
-  grid: '#262c3a',
-  axisText: '#8a93a6',
-  line: '#3987e5',
-  crosshair: '#5a6378',
-};
-
-/**
- * Zeichnet einen einfachen Liniengraphen auf ein <canvas>.
- * opts: { xMin, xMax, yMin, yMax, xTicks, yTicks, xFormat, yFormat,
- *         points: [[x, y], …], marker: [x, y] | null, hover: [x, y] | null }
- */
-function drawLineChart(canvas, opts) {
-  const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth;
-  const h = canvas.clientHeight;
-  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
-  }
-  const g = canvas.getContext('2d');
-  g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  g.fillStyle = CHART.surface;
-  g.fillRect(0, 0, w, h);
-
-  const pad = { l: 34, r: 8, t: 6, b: 20 };
-  const X = (x) => pad.l + ((x - opts.xMin) / (opts.xMax - opts.xMin)) * (w - pad.l - pad.r);
-  const Y = (y) => h - pad.b - ((y - opts.yMin) / (opts.yMax - opts.yMin)) * (h - pad.t - pad.b);
-  canvas._chart = { X, Y, pad, w, h, opts };
-
-  // Gitterlinien (Haarlinien, zurückhaltend) und Achsenbeschriftung
-  g.font = '10px system-ui, sans-serif';
-  g.fillStyle = CHART.axisText;
-  g.strokeStyle = CHART.grid;
-  g.lineWidth = 1;
-  g.textAlign = 'right';
-  g.textBaseline = 'middle';
-  for (const y of opts.yTicks) {
-    const py = Math.round(Y(y)) + 0.5;
-    g.beginPath(); g.moveTo(pad.l, py); g.lineTo(w - pad.r, py); g.stroke();
-    g.fillText(opts.yFormat(y), pad.l - 4, py);
-  }
-  g.textBaseline = 'top';
-  opts.xTicks.forEach((x, i) => {
-    const px = Math.round(X(x)) + 0.5;
-    g.beginPath(); g.moveTo(px, pad.t); g.lineTo(px, h - pad.b); g.stroke();
-    // erste Beschriftung linksbündig, letzte rechtsbündig, damit nichts abgeschnitten wird
-    g.textAlign = i === 0 ? 'left' : i === opts.xTicks.length - 1 ? 'right' : 'center';
-    g.fillText(opts.xFormat(x), px, h - pad.b + 4);
-  });
-
-  // Kurve: 2 px, runde Verbindungen
-  g.save();
-  g.beginPath();
-  g.rect(pad.l, pad.t - 4, w - pad.l - pad.r, h - pad.t - pad.b + 4);
-  g.clip();
-  g.strokeStyle = CHART.line;
-  g.lineWidth = 2;
-  g.lineJoin = 'round';
-  g.lineCap = 'round';
-  g.beginPath();
-  opts.points.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))));
-  g.stroke();
-  g.restore();
-
-  // Fadenkreuz beim Überfahren mit der Maus
-  if (opts.hover) {
-    const px = X(opts.hover[0]);
-    g.strokeStyle = CHART.crosshair;
-    g.beginPath(); g.moveTo(px, pad.t); g.lineTo(px, h - pad.b); g.stroke();
-    drawDot(g, px, Y(opts.hover[1]), 4, CHART.crosshair);
-  }
-  // Marker beim aktuellen Wert: r = 5 px mit 2 px Ring in der Flächenfarbe
-  if (opts.marker) drawDot(g, X(opts.marker[0]), Y(opts.marker[1]), 5, CHART.line);
-}
-
-function drawDot(g, x, y, r, color) {
-  g.fillStyle = CHART.surface;
-  g.beginPath(); g.arc(x, y, r + 2, 0, 2 * Math.PI); g.fill();
-  g.fillStyle = color;
-  g.beginPath(); g.arc(x, y, r, 0, 2 * Math.PI); g.fill();
-}
-
-/** Mausposition über einem Graphen → x-Wert (oder null) */
-function trackHover(canvas, onX) {
-  canvas.addEventListener('pointermove', (e) => {
-    const c = canvas._chart;
-    if (!c) return;
-    const rect = canvas.getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    const frac = (px - c.pad.l) / (c.w - c.pad.l - c.pad.r);
-    onX(frac < 0 || frac > 1 ? null : c.opts.xMin + frac * (c.opts.xMax - c.opts.xMin), px);
-  });
-  canvas.addEventListener('pointerleave', () => onX(null));
-}
-
-function placeTip(tip, canvas, x, y, text) {
-  const c = canvas._chart;
-  tip.hidden = false;
-  tip.textContent = text;
-  const px = c.X(x);
-  const left = px + 8 + tip.offsetWidth > c.w ? px - 8 - tip.offsetWidth : px + 8;
-  tip.style.left = `${left}px`;
-  tip.style.top = `${Math.max(14, c.Y(y) - 10 + 14)}px`;
-}
 
 /** Stützstellen für γ(β), dicht bei β → 1, wo γ steil ansteigt. */
-const GAMMA_POINTS = Array.from({ length: 241 }, (_, i) => {
+export const GAMMA_POINTS = Array.from({ length: 241 }, (_, i) => {
   const beta = BETA_MAX * (1 - Math.pow(1 - i / 240, 3));
   return [beta, lorentzGamma(beta)];
 });
 
-export function createCharts() {
-  const gammaCanvas = $('gamma-graph');
-  const gammaTip = $('gamma-tip');
-  const btCanvas = $('beta-t-graph');
-  const btTip = $('beta-t-tip');
-  let hoverBeta = null;
-  let hoverT = null;
-  trackHover(gammaCanvas, (x) => (hoverBeta = x === null ? null : Math.min(BETA_MAX, Math.max(0, x))));
-  trackHover(btCanvas, (x) => (hoverT = x));
+const commaFixed = (x, d) => x.toFixed(d).replace('.', ',');
 
+/** Diagramm γ über β mit Marker beim aktuellen β. */
+export function drawGammaChart(chart, state) {
   const gammaMax = lorentzGamma(BETA_MAX);
+  chart.draw({
+    xMin: 0, xMax: 1, yMin: 0, yMax: Math.ceil(gammaMax / 5) * 5,
+    xTicks: [0, 0.2, 0.4, 0.6, 0.8, 1], yTicks: [0, 5, 10, 15, 20, 25],
+    xFormat: (x) => (x === 0 ? '0' : commaFixed(x, 1)),
+    yFormat: (y) => String(y),
+    series: [{ points: GAMMA_POINTS, color: CHART.series[0] }],
+    markers: [{ x: state.beta, y: state.gamma, color: CHART.series[0] }],
+    hover: (x) => {
+      const b = Math.min(BETA_MAX, Math.max(0, x));
+      return { title: `β = ${formatNumber(b, 3)}`, rows: [{ y: lorentzGamma(b), color: CHART.series[0], text: `γ = ${formatNumber(lorentzGamma(b), 4)}` }] };
+    },
+  });
+}
 
-  /** Einmal pro Bild aufrufen. */
-  function update(state) {
-    drawLineChart(gammaCanvas, {
-      xMin: 0, xMax: 1, yMin: 0, yMax: Math.ceil(gammaMax / 5) * 5,
-      xTicks: [0, 0.2, 0.4, 0.6, 0.8, 1], yTicks: [0, 5, 10, 15, 20, 25].filter((v) => v <= gammaMax + 5),
-      xFormat: (x) => (x === 0 ? '0' : x.toFixed(1).replace('.', ',')),
-      yFormat: (y) => String(y),
-      points: GAMMA_POINTS,
-      marker: [state.beta, state.gamma],
-      hover: hoverBeta === null ? null : [hoverBeta, lorentzGamma(hoverBeta)],
-    });
-    if (hoverBeta !== null) {
-      placeTip(gammaTip, gammaCanvas, hoverBeta, lorentzGamma(hoverBeta),
-        `β = ${formatNumber(hoverBeta, 3)}   γ = ${formatNumber(lorentzGamma(hoverBeta), 4)}`);
-    } else {
-      gammaTip.hidden = true;
-    }
+/** Diagramm β über t (Zeit in S) der Beschleunigungsphase mit Marker bei t. */
+export function drawBetaTimeChart(chart, state) {
+  const acc = state.accel;
+  const { T } = accelTiming(acc);
+  if (!(T > 0)) return;
+  const u = acc.unitS;
+  const betaAt = (t) => Math.min(BETA_MAX, accelBetaAt(acc, t));
+  const pts = Array.from({ length: 201 }, (_, i) => [((i / 200) * T) / u, betaAt((i / 200) * T)]);
+  chart.draw({
+    xMin: 0, xMax: T / u, yMin: 0, yMax: 1,
+    xTicks: [0, T / u / 2, T / u], yTicks: [0, 0.25, 0.5, 0.75, 1],
+    xFormat: (x) => (x === 0 ? '0' : `${formatNumber(x, 3)} ${acc.unitName}`),
+    yFormat: (y) => commaFixed(y, 2),
+    series: [{ points: pts, color: CHART.series[0] }],
+    markers: [{ x: acc.t / u, y: state.beta, color: CHART.series[0] }],
+    hover: (x) => ({
+      title: `t = ${formatNumber(x, 3)} ${acc.unitName}`,
+      rows: [{ y: betaAt(x * u), color: CHART.series[0], text: `β = ${formatNumber(betaAt(x * u), 4)}` }],
+    }),
+  });
+}
 
-    const acc = state.accel;
-    $('beta-t-figure').hidden = !acc.active;
-    if (!acc.active) return;
-    $('beta-t-curve').textContent = {
-      constant: 'konstante Eigenbeschleunigung', linear: 'linear in β', smooth: 'weiche Kurve',
-    }[acc.curve];
-    const T = acc.durationS;
-    const u = acc.unitS;
-    const betaAt = (t) => Math.min(BETA_MAX, accelerationBeta(acc.curve, t, acc.a, T));
-    const pts = Array.from({ length: 201 }, (_, i) => [(i / 200) * T / u, betaAt((i / 200) * T)]);
-    drawLineChart(btCanvas, {
-      xMin: 0, xMax: T / u, yMin: 0, yMax: 1,
-      xTicks: [0, T / u / 2, T / u], yTicks: [0, 0.25, 0.5, 0.75, 1],
-      xFormat: (x) => (x === 0 ? '0' : `${formatNumber(x, 3)} ${acc.unitName}`),
-      yFormat: (y) => y.toFixed(2).replace('.', ','),
-      points: pts,
-      marker: [acc.t / u, state.beta],
-      hover: hoverT === null ? null : [hoverT, betaAt(hoverT * u)],
-    });
-    if (hoverT !== null) {
-      placeTip(btTip, btCanvas, hoverT, betaAt(hoverT * u),
-        `t = ${formatNumber(hoverT, 3)} ${acc.unitName}   β = ${formatNumber(betaAt(hoverT * u), 4)}`);
-    } else {
-      btTip.hidden = true;
-    }
-  }
-  return { update };
+export function curveName(curve) {
+  return { constant: 'konstante Eigenbeschleunigung', linear: 'linear in β', smooth: 'weiche Kurve' }[curve];
+}
+
+/** Graphen in der Seitenleiste der Simulation. */
+export function createSimCharts() {
+  const gFig = $('gamma-graph').parentElement;
+  const tFig = $('beta-t-figure');
+  const gamma = createLineChart($('gamma-graph'), gFig.querySelector('.chart-tip'));
+  const betaT = createLineChart($('beta-t-graph'), tFig.querySelector('.chart-tip'));
+  return {
+    update(state) {
+      drawGammaChart(gamma, state);
+      tFig.hidden = !state.accel.active;
+      if (state.accel.active) {
+        tFig.querySelector('.curve-name').textContent = curveName(state.accel.curve);
+        drawBetaTimeChart(betaT, state);
+      }
+    },
+  };
 }

@@ -41,6 +41,14 @@ import {
   betaSmooth,
   accelerationBeta,
   properTimeNumeric,
+  properVelocity,
+  betaFromProperVelocity,
+  accelerationDuration,
+  accelerationFromDuration,
+  betaConstantBetween,
+  psiFromPsiPrime,
+  terrellRotationAngle,
+  terrellLengthFactor,
 } from '../src/physics.js';
 
 /** Reproduzierbarer Zufallsgenerator (mulberry32), damit Tests deterministisch sind. */
@@ -285,28 +293,68 @@ describe('Weitere Selbsttests', () => {
     expect(properTimeConstantAcceleration(a, 1e8)).toBeLessThan(1e8);
   });
 
-  it('lineare und weiche Kurve: Anfang 0, Ende β_end, monoton', () => {
+  it('lineare und weiche Kurve: Anfang β₀, Ende β₁, monoton (auch beim Bremsen)', () => {
     for (const f of [betaLinear, betaSmooth]) {
-      expect(f(0, 10, 0.9)).toBe(0);
-      expect(f(10, 10, 0.9)).toBeCloseTo(0.9, 12);
-      expect(f(20, 10, 0.9)).toBeCloseTo(0.9, 12);
-      let prev = -1;
-      for (let t = 0; t <= 10; t += 0.5) {
-        const b = f(t, 10, 0.9);
-        expect(b).toBeGreaterThanOrEqual(prev);
-        prev = b;
+      for (const [b0, b1] of [[0, 0.9], [0.3, 0.99], [0.95, 0.2]]) {
+        expect(f(0, 10, b0, b1)).toBeCloseTo(b0, 12);
+        expect(f(10, 10, b0, b1)).toBeCloseTo(b1, 12);
+        expect(f(20, 10, b0, b1)).toBeCloseTo(b1, 12);
+        let prev = f(0, 10, b0, b1);
+        for (let t = 0.5; t <= 10; t += 0.5) {
+          const b = f(t, 10, b0, b1);
+          expect(Math.sign(b - prev) * Math.sign(b1 - b0)).toBeGreaterThanOrEqual(0);
+          prev = b;
+        }
       }
     }
   });
 
-  it('Kurvenwahl: alle drei Kurven starten bei 0 und enden beim selben β', () => {
+  it('konstante Eigenbeschleunigung zwischen β₀ und β₁: Dauer ↔ a, Sonderfall Start aus der Ruhe', () => {
     const a = 9.81;
-    const T = 5 * 365.25 * 86400;
-    const end = betaConstantProperAcceleration(a, T);
-    for (const curve of ['constant', 'linear', 'smooth']) {
-      expect(accelerationBeta(curve, 0, a, T)).toBe(0);
-      expect(accelerationBeta(curve, T, a, T)).toBeCloseTo(end, 12);
+    // Start aus der Ruhe: identisch mit der alten Formel β·γ = a·t/c
+    const T = accelerationDuration(a, 0, 0.9);
+    expect(T / timeToReachBeta(a, 0.9)).toBeCloseTo(1, 12);
+    for (const t of [0, 0.3 * T, 0.7 * T, T]) {
+      expect(betaConstantBetween(t, T, 0, 0.9)).toBeCloseTo(betaConstantProperAcceleration(a, t), 12);
     }
+    // a aus der Dauer und Dauer aus a sind zueinander invers, auch beim Bremsen
+    for (const [b0, b1] of [[0.2, 0.95], [0.99, 0.5]]) {
+      const Tx = accelerationDuration(a, b0, b1);
+      expect(accelerationFromDuration(Tx, b0, b1)).toBeCloseTo(a, 9);
+      expect(betaConstantBetween(0, Tx, b0, b1)).toBeCloseTo(b0, 12);
+      expect(betaConstantBetween(Tx, Tx, b0, b1)).toBeCloseTo(b1, 12);
+    }
+    // u = βγ ist linear in t
+    const Tm = accelerationDuration(a, 0.5, 0.99);
+    const u = (t) => properVelocity(betaConstantBetween(t, Tm, 0.5, 0.99));
+    expect(u(Tm / 2)).toBeCloseTo((u(0) + u(Tm)) / 2, 9);
+    expect(betaFromProperVelocity(properVelocity(0.97))).toBeCloseTo(0.97, 12);
+  });
+
+  it('Kurvenwahl: alle drei Kurven starten bei β₀ und enden bei β₁', () => {
+    const T = accelerationDuration(9.81, 0.1, 0.98);
+    for (const curve of ['constant', 'linear', 'smooth']) {
+      expect(accelerationBeta(curve, 0, T, 0.1, 0.98)).toBeCloseTo(0.1, 12);
+      expect(accelerationBeta(curve, T, T, 0.1, 0.98)).toBeCloseTo(0.98, 12);
+    }
+  });
+
+  it('Terrell: bei ψ\' = 90° Drehwinkel arcsin β und Verkürzung 1/γ; β = 0 ändert nichts', () => {
+    for (const beta of [0.5, 0.9, 0.99]) {
+      expect(terrellRotationAngle(beta, rad(90))).toBeCloseTo(Math.asin(beta), 12);
+      expect(terrellLengthFactor(beta, rad(90))).toBeCloseTo(1 / lorentzGamma(beta), 12);
+      // Verkürzung = sin ψ / sin ψ'
+      for (const pp of [30, 60, 120, 150]) {
+        const psi = psiFromPsiPrime(beta, rad(pp));
+        expect(terrellLengthFactor(beta, rad(pp))).toBeCloseTo(Math.sin(psi) / Math.sin(rad(pp)), 10);
+        expect(deg(aberrationPsi(beta, psi))).toBeCloseTo(pp, 9);
+      }
+    }
+    expect(terrellRotationAngle(0, rad(70))).toBeCloseTo(0, 12);
+    expect(terrellLengthFactor(0, rad(70))).toBeCloseTo(1, 12);
+    // vorn gestreckt, hinten verkürzt
+    expect(terrellLengthFactor(0.9, rad(20))).toBeGreaterThan(1);
+    expect(terrellLengthFactor(0.9, rad(150))).toBeLessThan(1);
   });
 
   it('Eigenzeit numerisch = geschlossene Form bei konstanter Eigenbeschleunigung', () => {

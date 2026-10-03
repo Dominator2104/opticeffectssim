@@ -147,3 +147,125 @@ export function buildBlackbodyTable(size = TABLE_SIZE) {
   }
   return data;
 }
+
+/**
+ * Schnelle Näherung von Y(T) für viele Auswertungen (Übersicht): lineare
+ * Interpolation von log10 Y in log10 T auf der Tabelle von buildBlackbodyTable.
+ * Oberhalb der Tabelle Rayleigh-Jeans (Y ∝ T), unterhalb Fortsetzung mit der
+ * Steigung am Tabellenanfang (dort ist Y ohnehin praktisch null).
+ * @returns {(T:number)=>number}
+ */
+export function createVisibleLuminanceLookup(size = TABLE_SIZE) {
+  const table = buildBlackbodyTable(size);
+  const logY = new Float64Array(size);
+  for (let i = 0; i < size; i++) logY[i] = table[4 * i + 3];
+  const lo = Math.log10(TABLE_T_MIN);
+  const hi = Math.log10(TABLE_T_MAX);
+  const step = (hi - lo) / (size - 1);
+  return (T) => {
+    const x = (Math.log10(T) - lo) / step;
+    if (x >= size - 1) return Math.pow(10, logY[size - 1] + (Math.log10(T) - hi));
+    if (x <= 0) return Math.pow(10, logY[0] + x * (logY[1] - logY[0]));
+    const i = Math.floor(x);
+    const f = x - i;
+    return Math.pow(10, logY[i] * (1 - f) + logY[i + 1] * f);
+  };
+}
+
+/* ------------------------------------------------------------------------- */
+/* Gesamtes Spektrum als Falschfarben                                        */
+/* ------------------------------------------------------------------------- */
+
+/** Stefan-Boltzmann-Konstante σ in W/(m²·K⁴) (CODATA 2018). */
+const SIGMA = 5.670374419e-8;
+
+/**
+ * Wellenlängenbereich, der im Modus "gesamtes Spektrum" auf den sichtbaren
+ * Bereich 380–780 nm gestaucht wird (logarithmisch, Wahl des Auftraggebers).
+ */
+export const FULL_MIN_NM = 50;
+export const FULL_MAX_NM = 20000;
+
+/** Grenze für "sendet praktisch nur IR bzw. UV": weniger als 1 % im Sichtbaren. */
+export const VISIBLE_FRACTION_LIMIT = 0.01;
+
+/**
+ * Anteil der gesamten Strahlung eines Schwarzkörpers, der zwischen 380 und
+ * 780 nm liegt:
+ *
+ *   f(T) = ∫₃₈₀⁷⁸⁰ B_λ(λ, T) dλ / (σT⁴/π)
+ *
+ * (σT⁴/π ist die über alle Wellenlängen integrierte Strahldichte.)
+ * Beispiele: 5 800 K ≈ 47 %, unter ≈ 1 900 K und über ≈ 60 000 K unter 1 %.
+ */
+export function visibleFraction(T) {
+  let sum = 0;
+  for (let nm = VISIBLE_MIN_NM; nm < VISIBLE_MAX_NM; nm++) sum += planck(nm + 0.5, T);
+  return (sum * 1e-9) / ((SIGMA * T ** 4) / Math.PI);
+}
+
+/**
+ * Abbildung "Anzeige-Wellenlänge → echte Wellenlänge" für die Falschfarben:
+ * 380 nm ↦ 50 nm, 780 nm ↦ 20 µm, dazwischen logarithmisch:
+ *   λ_echt = λ_min · (λ_max/λ_min)^((λ_Anzeige − 380 nm)/400 nm)
+ */
+export function trueWavelengthForDisplay(displayNm) {
+  const s = (displayNm - VISIBLE_MIN_NM) / (VISIBLE_MAX_NM - VISIBLE_MIN_NM);
+  return FULL_MIN_NM * Math.pow(FULL_MAX_NM / FULL_MIN_NM, s);
+}
+
+/**
+ * Normfarbwerte des gestauchten Spektrums: Die Strahlung jedes echten
+ * Wellenlängenintervalls dλ_echt wird der zugehörigen Anzeige-Wellenlänge
+ * zugeordnet und dort mit x̄, ȳ, z̄ gewichtet:
+ *
+ *   X = Σ B_λ(λ_echt, T) · dλ_echt · x̄(λ_Anzeige)    (Y, Z entsprechend)
+ *
+ * mit dλ_echt = λ_echt · ln(λ_max/λ_min) · Δλ_Anzeige / 400 nm.
+ * Das ist eine FALSCHFARBEN-Darstellung: Sie zeigt, wo das Spektrum liegt,
+ * nicht, was ein Auge sähe.
+ */
+export function falseColorXYZ(T) {
+  const lnRatio = Math.log(FULL_MAX_NM / FULL_MIN_NM);
+  let X = 0;
+  let Y = 0;
+  let Z = 0;
+  for (const [nm, xb, yb, zb] of CIE_1931_2DEG) {
+    const lt = trueWavelengthForDisplay(nm);
+    const dl = lt * lnRatio * (CIE_STEP_NM / (VISIBLE_MAX_NM - VISIBLE_MIN_NM)) * 1e-9;
+    const e = planck(lt, T) * dl;
+    X += e * xb;
+    Y += e * yb;
+    Z += e * zb;
+  }
+  return { X, Y, Z };
+}
+
+/** Falschfarbe als lineares sRGB, größter Kanal = 1 (wie blackbodyColor). */
+export function falseColor(T) {
+  const rgb = xyzToLinearSrgb(falseColorXYZ(T));
+  const r = Math.max(0, rgb.r);
+  const g = Math.max(0, rgb.g);
+  const b = Math.max(0, rgb.b);
+  const m = Math.max(r, g, b, 1e-30);
+  return { r: r / m, g: g / m, b: b / m };
+}
+
+/**
+ * Zweite Nachschlagetabelle T → (R, G, B, log10 f) für den Modus
+ * "gesamtes Spektrum": RGB = Falschfarbe, A = log10 des Sichtbarkeitsanteils
+ * (für die automatische Kennzeichnung "nur IR/UV"). Gleiche Temperaturstufen
+ * wie buildBlackbodyTable().
+ */
+export function buildFalseColorTable(size = TABLE_SIZE) {
+  const data = new Float32Array(4 * size);
+  for (let i = 0; i < size; i++) {
+    const T = tableTemperature(i, size);
+    const c = falseColor(T);
+    data[4 * i] = c.r;
+    data[4 * i + 1] = c.g;
+    data[4 * i + 2] = c.b;
+    data[4 * i + 3] = Math.max(-30, Math.log10(visibleFraction(T)));
+  }
+  return data;
+}

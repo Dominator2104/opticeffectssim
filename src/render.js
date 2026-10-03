@@ -18,8 +18,8 @@
  *   2. Dieses Bild einmal nach sRGB umrechnen und auf den Bildschirm bringen.
  */
 import * as THREE from 'three';
-import { createCubeGeometry, createSphereGeometry, bodyCenter, BODY_TEMPERATURE } from './bodies.js';
-import { buildBlackbodyTable, visibleLuminance, TABLE_SIZE, TABLE_T_MIN, TABLE_T_MAX } from './blackbody.js';
+import { createCubeGeometry, createSphereGeometry, createCubeEdges, BODY_TEMPERATURE } from './bodies.js';
+import { buildBlackbodyTable, buildFalseColorTable, visibleLuminance, TABLE_SIZE, TABLE_T_MIN, TABLE_T_MAX } from './blackbody.js';
 
 /* ------------------------------------------------------------------------- */
 /* Gemeinsamer Shader-Code                                                   */
@@ -73,19 +73,38 @@ float beamingExtended(float D) {
 `;
 
 /**
- * Zugriff auf die Schwarzkörper-Tabelle aus blackbody.js (als Textur).
- * RGB: Farbton (größter Kanal = 1, linear), A: log10 Y(T) − log10 Y(5800 K).
+ * Zugriff auf die Schwarzkörper-Tabellen aus blackbody.js (als Texturen).
+ *   uBlackbody:  RGB = Farbton (größter Kanal = 1, linear), A = log10 Y(T) − log10 Y(5800 K)
+ *   uFalseColor: RGB = Falschfarbe des gestauchten Gesamtspektrums,
+ *                A = log10 des Strahlungsanteils im Sichtbaren
  */
 export const GLSL_BLACKBODY = /* glsl */ `
 uniform sampler2D uBlackbody;
+uniform sampler2D uFalseColor;
 uniform float uLogTMin;   // log10 der kleinsten Tabellentemperatur
 uniform float uLogTMax;   // log10 der größten Tabellentemperatur
 uniform float uTableSize;
 const float INV_LN10 = 0.43429448190325176;
 
-vec4 blackbodyLookup(float T) {
+vec2 tableCoord(float T) {
   float u = clamp((log(T) * INV_LN10 - uLogTMin) / (uLogTMax - uLogTMin), 0.0, 1.0);
-  return texture(uBlackbody, vec2((u * (uTableSize - 1.0) + 0.5) / uTableSize, 0.5));
+  return vec2((u * (uTableSize - 1.0) + 0.5) / uTableSize, 0.5);
+}
+
+vec4 blackbodyLookup(float T) {
+  return texture(uBlackbody, tableCoord(T));
+}
+
+// Falschfarbe (blackbody.falseColor) des auf 380–780 nm gestauchten Spektrums 50 nm – 20 µm
+vec3 falseColorLookup(float T) {
+  return texture(uFalseColor, tableCoord(T)).rgb;
+}
+
+// log10 des Anteils der Strahlung im Sichtbaren (blackbody.visibleFraction).
+// Oberhalb der Tabelle (Rayleigh-Jeans): sichtbar ∝ T, gesamt ∝ T⁴, also f ∝ T⁻³.
+float log10VisibleFraction(float T) {
+  float logT = log(T) * INV_LN10;
+  return texture(uFalseColor, tableCoord(T)).a - 3.0 * max(logT - uLogTMax, 0.0);
 }
 
 // log10 der sichtbaren Helligkeit Y(T) (bis auf eine Konstante).
@@ -166,8 +185,7 @@ ${GLSL_PROJECTION}
 uniform bool uAberration;
 uniform bool uDoppler;
 uniform bool uBeaming;
-uniform bool uVisibleOnly; // Helligkeit nur aus dem sichtbaren Spektralanteil
-uniform bool uMarkBands;   // Sterne mit Strahlungsmaximum in UV/IR kennzeichnen
+uniform bool uFullSpectrum; // aus: nur sichtbares Licht (Auge), an: gesamtes Spektrum (Falschfarben)
 uniform float uExposure;   // Belichtung: Faktor, mit dem F multipliziert wird (Darstellung)
 uniform float uBaseSize;   // Punktgröße eines gerade sichtbaren Sterns in Pixeln
 uniform float uMaxSize;    // größte Punktgröße in Pixeln (Bildschirm ist nicht beliebig hell)
@@ -179,7 +197,7 @@ in float aTemperature;     // Temperatur T des Sterns in S (stars.js)
 out vec3 vColor;
 out float vIntensity;
 out float vCoreFraction;   // Anteil des Lichtflecks an der Punktgröße
-out float vMark;           // 0 = keine Markierung, 1 = UV (Ring), 2 = IR (Quadrat)
+out float vMark;           // 0 = keine Markierung, 1 = nur UV (Ring), 2 = nur IR (Quadrat)
 out float vSpritePx;
 
 void main() {
@@ -191,15 +209,18 @@ void main() {
   // ob die Aberration gerade angezeigt wird.
   float D = dopplerFactor(n.z);
 
-  // Farbe: Schwarzkörper bei der scheinbaren Temperatur T' = T/D (Doppler an)
+  // Farbe: Schwarzkörper bei der scheinbaren Temperatur T' = T/D (Doppler an).
+  // Nur sichtbar: Farbe, die das Auge sähe. Gesamtes Spektrum: Falschfarbe.
   float T = aTemperature;
   float Tseen = uDoppler ? apparentTemperature(T, D) : T;
-  vColor = blackbodyLookup(Tseen).rgb;
+  vColor = uFullSpectrum ? falseColorLookup(Tseen) : blackbodyLookup(Tseen).rgb;
 
   // Helligkeit: Sterne sind Punkte → D^(−2), nicht D^(−4)!
+  // Nur sichtbar: zusätzlich der Anteil im Sichtbaren (zusammen D²·Y(T')/Y(T)).
+  // Gesamtes Spektrum: bolometrisch, also nur D^(−2).
   float flux = aFlux;
   if (uBeaming) flux *= beamingPointSource(D);
-  if (uVisibleOnly) flux *= visibleSpectralFactor(T, Tseen);
+  if (!uFullSpectrum) flux *= visibleSpectralFactor(T, Tseen);
 
   // Darstellung eines Punktes (keine Physik): Die Bildschirmhelligkeit ist
   // "Fläche × Leuchtdichte" des Lichtflecks. Bis Intensität 1 wird nur die
@@ -212,13 +233,13 @@ void main() {
   float core = min(uBaseSize * sqrt(max(e, 1.0)), uMaxSize);
   vIntensity = min(e, 1.0);
 
-  // Kennzeichnung: Strahlungsmaximum λ_max = b/T' außerhalb 380–780 nm
-  // (nur bei Sternen, die überhaupt sichtbar sind)
+  // Kennzeichnung (automatisch im Modus "gesamtes Spektrum"): weniger als 1 %
+  // der Strahlung im Sichtbaren → "sendet praktisch nur UV bzw. IR".
+  // Welche Seite, entscheidet die Lage des Maximums (Wien). Nur bei Sternen,
+  // die auf dem Bildschirm überhaupt hell genug sind.
   vMark = 0.0;
-  float lambdaMax = wienPeakWavelengthNm(Tseen);
-  if (uMarkBands && e >= 1.0) {
-    if (lambdaMax < 380.0) vMark = 1.0;
-    else if (lambdaMax > 780.0) vMark = 2.0;
+  if (uFullSpectrum && e >= 1.0 && log10VisibleFraction(Tseen) < -2.0) {
+    vMark = wienPeakWavelengthNm(Tseen) < 380.0 ? 1.0 : 2.0;
   }
   float sprite = vMark > 0.0 ? max(core, uMarkSize) : core;
   vCoreFraction = core / sprite;
@@ -316,7 +337,7 @@ ${GLSL_PHYSICS}
 ${GLSL_BLACKBODY}
 uniform bool uDoppler;
 uniform bool uBeaming;
-uniform bool uVisibleOnly;
+uniform bool uFullSpectrum;
 uniform bool uUniformTemperature;
 uniform float uBodyTemperature;
 uniform float uRadiance;   // Strahldichte in Ruhe, in Bildschirmeinheiten (Belichtung)
@@ -338,7 +359,7 @@ void main() {
   float D = dopplerFactor(n.z);                  // D für diesen Oberflächenpunkt
   float T = uUniformTemperature ? uBodyTemperature : vTemperature;
   float Tseen = uDoppler ? apparentTemperature(T, D) : T;
-  vec3 color = blackbodyLookup(Tseen).rgb;
+  vec3 color = uFullSpectrum ? falseColorLookup(Tseen) : blackbodyLookup(Tseen).rgb;
 
   // Schachbrett: helle und dunkle Felder (Emission 1 bzw. 0,5)
   vec2 cell = floor(vUv * uChecker);
@@ -347,7 +368,7 @@ void main() {
   // Helligkeit: ausgedehnte Fläche → D^(−4), nicht D^(−2)!
   float L = uRadiance * pattern;
   if (uBeaming) L *= beamingExtended(D);
-  if (uVisibleOnly) L *= visibleSpectralFactor(T, Tseen);
+  if (!uFullSpectrum) L *= visibleSpectralFactor(T, Tseen); // nur sichtbar: Y(T')/Y(T)
 
   // gleiche Strahldichte → gleiche Helligkeit, unabhängig vom Farbton
   float colorLuminance = max(dot(color, vec3(0.2126, 0.7152, 0.0722)), 1.0e-3);
@@ -373,6 +394,49 @@ function createBodyMesh(geometry, sharedUniforms, checker) {
   mesh.frustumCulled = false;
   mesh.renderOrder = -1; // vor den Sternen zeichnen, damit sie verdeckt werden
   return mesh;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Vergleichswürfel ohne Relativität                                         */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Drahtgitter eines RUHENDEN Würfels (keine Aberration), gleich ausgerichtet
+ * wie der Terrell-Würfel. main.js legt ihn an die gesehene Stelle ψ' des
+ * Würfelmittelpunkts und in dessen scheinbare Entfernung r/D (Entfernung des
+ * Emissionsereignisses in S'), damit beide gleich groß erscheinen. Der
+ * Unterschied zwischen beiden Bildern ist dann die Terrell-Drehung.
+ */
+const GHOST_VERTEX = /* glsl */ `
+${GLSL_PROJECTION}
+uniform vec3 uCenter;   // Mittelpunkt im Raumschiffsystem
+void main() {
+  vec3 p = uCenter + position;
+  gl_Position = projectDirection(normalize(p), length(p));
+}
+`;
+
+const GHOST_FRAGMENT = /* glsl */ `
+precision highp float;
+out vec4 fragColor;
+void main() {
+  fragColor = vec4(0.75, 0.78, 0.85, 1.0);
+}
+`;
+
+function createGhostCube(sharedUniforms) {
+  const material = new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    vertexShader: GHOST_VERTEX,
+    fragmentShader: GHOST_FRAGMENT,
+    uniforms: { ...sharedUniforms, uCenter: { value: new THREE.Vector3() } },
+    depthTest: false,
+    depthWrite: false,
+  });
+  const lines = new THREE.LineSegments(createCubeEdges(2), material);
+  lines.frustumCulled = false;
+  lines.renderOrder = 5;
+  return lines;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -461,11 +525,18 @@ void main() {
 function createBlackbodyTexture() {
   const table = buildBlackbodyTable(TABLE_SIZE);
   const logYRef = Math.log10(visibleLuminance(5800));
+  for (let i = 3; i < table.length; i += 4) table[i] -= logYRef;
+  return tableToTexture(table);
+}
+
+/** Falschfarben-Tabelle (gesamtes Spektrum) aus blackbody.js als 1D-Textur. */
+function createFalseColorTexture() {
+  return tableToTexture(buildFalseColorTable(TABLE_SIZE));
+}
+
+function tableToTexture(table) {
   const half = new Uint16Array(table.length);
-  for (let i = 0; i < table.length; i++) {
-    const v = i % 4 === 3 ? table[i] - logYRef : table[i];
-    half[i] = THREE.DataUtils.toHalfFloat(v);
-  }
+  for (let i = 0; i < table.length; i++) half[i] = THREE.DataUtils.toHalfFloat(table[i]);
   const tex = new THREE.DataTexture(half, TABLE_SIZE, 1, THREE.RGBAFormat, THREE.HalfFloatType);
   tex.minFilter = THREE.LinearFilter;
   tex.magFilter = THREE.LinearFilter;
@@ -520,14 +591,14 @@ export function createRenderer(canvas) {
     uAberration: { value: true },
     uDoppler: { value: true },
     uBeaming: { value: true },
-    uVisibleOnly: { value: false },
-    uMarkBands: { value: false },
+    uFullSpectrum: { value: false },
     uExposure: { value: 1 },
     uBaseSize: { value: 2.0 },
     uMaxSize: { value: 24.0 },
     uMarkSize: { value: 11.0 },
     uPixelRatio: { value: renderer.getPixelRatio() },
     uBlackbody: { value: createBlackbodyTexture() },
+    uFalseColor: { value: createFalseColorTexture() },
     uLogTMin: { value: Math.log10(TABLE_T_MIN) },
     uLogTMax: { value: Math.log10(TABLE_T_MAX) },
     uTableSize: { value: TABLE_SIZE },
@@ -564,7 +635,8 @@ export function createRenderer(canvas) {
   const sphere = createBodyMesh(createSphereGeometry(1), uniforms, [16, 8]);
   scene.add(cube, sphere);
   const windowMarker = createWindowMarker(uniforms, WINDOW_HALF_ANGLE_DEG);
-  scene.add(windowMarker);
+  const ghost = createGhostCube(uniforms);
+  scene.add(windowMarker, ghost);
 
   function setStars(stars) {
     if (starPoints) {
@@ -587,7 +659,7 @@ export function createRenderer(canvas) {
   }
 
   /**
-   * @param {object} s  Zustand: beta, gamma, aberration, doppler, beaming, visibleOnly, markBands,
+   * @param {object} s  Zustand: beta, gamma, aberration, doppler, beaming, spectrum ('visible'|'full'),
    *                    projection ('perspective'|'stereographic'),
    *                    fovDeg (vertikales Sichtfeld), exposure, yaw, pitch
    */
@@ -597,8 +669,7 @@ export function createRenderer(canvas) {
     uniforms.uAberration.value = s.aberration;
     uniforms.uDoppler.value = s.doppler;
     uniforms.uBeaming.value = s.beaming;
-    uniforms.uVisibleOnly.value = s.visibleOnly;
-    uniforms.uMarkBands.value = s.markBands;
+    uniforms.uFullSpectrum.value = s.spectrum === 'full';
     uniforms.uProjection.value = s.projection === 'stereographic' ? 1 : 0;
     const halfFov = (s.fovDeg * Math.PI) / 360;
     uniforms.uFocal.value = 1 / Math.tan(halfFov);
@@ -606,12 +677,14 @@ export function createRenderer(canvas) {
     uniforms.uExposure.value = s.exposure;
     uniforms.uView.value = viewMatrix(s.yaw, s.pitch);
 
-    // Körper: Würfel links (φ = 0), Kugel rechts (φ = 180°), beide unter ψ in S
+    // Mittelpunkte in S relativ zum Beobachter berechnet main.js (Platzierung, Vorbeiflug)
     const b = s.bodies;
     cube.visible = b.enabled && b.showCube;
     sphere.visible = b.enabled && b.showSphere;
-    cube.material.uniforms.uCenter.value.fromArray(bodyCenter(b.psi, 0, b.distance, b.observerZ));
-    sphere.material.uniforms.uCenter.value.fromArray(bodyCenter(b.psi, Math.PI, b.distance, b.observerZ));
+    cube.material.uniforms.uCenter.value.fromArray(b.cubeCenter);
+    sphere.material.uniforms.uCenter.value.fromArray(b.sphereCenter);
+    ghost.visible = cube.visible && b.ghost && !!b.ghostCenter;
+    if (b.ghostCenter) ghost.material.uniforms.uCenter.value.fromArray(b.ghostCenter);
     uniforms.uUniformTemperature.value = b.uniformTemperature;
     uniforms.uRadiance.value = b.radiance;
     windowMarker.visible = s.windowMarker;
