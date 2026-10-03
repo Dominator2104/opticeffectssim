@@ -413,6 +413,81 @@ export function forwardConeSkyFraction(beta) {
   return (1 - beta) / 2;
 }
 
+/**
+ * Grenzgröße des bloßen Auges unter dunklem Himmel in mag (üblicher Richtwert).
+ */
+export const NAKED_EYE_LIMIT_MAG = 6.5;
+
+/**
+ * Wie viele Sterne eines Sternfelds sind mit bloßem Auge sichtbar, wenn man
+ * Doppler-Effekt und Beaming im SICHTBAREN Licht berücksichtigt?
+ *
+ * Für jeden Stern: D aus seiner Richtung (dopplerFactor), T' = T/D, sichtbare
+ * Bestrahlungsstärke F'_vis = F · D²·Y(T')/Y(T) (beamingPointSourceVisible).
+ * Sichtbar, wenn F'_vis ≥ 10^(−0,4 · 6,5), also heller als 6,5 mag.
+ *
+ * @param {{count:number, directions:Float32Array, temperatures:Float32Array, fluxes:Float32Array}} stars
+ *        Sternfeld (stars.js); F relativ zu 0 mag
+ * @param {number} beta
+ * @param {(T:number)=>number} Y  sichtbare Helligkeit Y(T) (blackbody.js)
+ * @param {number} stride  nur jeden stride-ten Stern auswerten (Ergebnis hochgerechnet)
+ * @returns {{visible:number, invisible:number}}
+ */
+export function nakedEyeVisibleCount(stars, beta, Y, stride = 1, limitMag = NAKED_EYE_LIMIT_MAG) {
+  const Fmin = Math.pow(10, -0.4 * limitMag);
+  let visible = 0;
+  let total = 0;
+  for (let i = 0; i < stars.count; i += stride) {
+    const D = dopplerFactor(beta, stars.directions[3 * i + 2]);
+    const T = stars.temperatures[i];
+    const F = stars.fluxes[i] * beamingPointSourceVisible(D, Y(T), Y(apparentTemperature(T, D)));
+    if (F >= Fmin) visible++;
+    total++;
+  }
+  const scale = stars.count / Math.max(1, total);
+  return { visible: visible * scale, invisible: (total - visible) * scale };
+}
+
+/* ------------------------------------------------------------------------- */
+/* 5. Terrell-Penrose (Form)                                                 */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * Blickwinkel ψ in S zu einem gesehenen Winkel ψ' (Umkehrung der Aberration).
+ */
+export function psiFromPsiPrime(beta, psiPrime) {
+  return Math.acos(clampCos(inverseAberrationCosPsi(beta, Math.cos(psiPrime))));
+}
+
+/**
+ * Terrell-Drehwinkel eines kleinen Körpers, der unter ψ' gesehen wird:
+ *
+ *   α = ψ − ψ'
+ *
+ * Das Bild eines kleinen, in S ruhenden Körpers ist (wegen der Winkeltreue der
+ * Aberration) das Bild, das man in Ruhe aus der Richtung ψ sähe — nur an der
+ * Stelle ψ'. Verglichen mit einem ruhenden Körper an derselben Bildstelle
+ * erscheint er also um α gedreht (Terrell 1959; Boas 1961).
+ * Bei ψ' = 90° ist cos ψ = −β, also α = arcsin β.
+ */
+export function terrellRotationAngle(beta, psiPrime) {
+  return psiFromPsiPrime(beta, psiPrime) - psiPrime;
+}
+
+/**
+ * Scheinbare Verkürzung der Ausdehnung in Flugrichtung, verglichen mit einem
+ * ruhenden Körper an derselben Bildstelle:
+ *
+ *   sin ψ / sin ψ' = 1/D = 1 / (γ·(1 − β·cos ψ'))
+ *
+ * (wegen sin ψ' = D·sin ψ, siehe aberrateDirection). Bei ψ' = 90° ergibt das
+ * genau 1/γ: Die Lorentz-Kontraktion erscheint als Drehung. Vorn ist der
+ * Faktor größer als 1 (gestreckt), hinten kleiner als 1.
+ */
+export function terrellLengthFactor(beta, psiPrime) {
+  return 1 / dopplerFactorFromPrime(beta, Math.cos(psiPrime));
+}
+
 /* ------------------------------------------------------------------------- */
 /* 6. Beschleunigungsphase                                                   */
 /* ------------------------------------------------------------------------- */
@@ -451,21 +526,64 @@ export function properTimeConstantAcceleration(a, t) {
 }
 
 /**
- * Linear in β (unphysikalisch, aber didaktisch praktisch):
- *   β(t) = β_end · t/T   für 0 ≤ t ≤ T
+ * Eigengeschwindigkeit u = β·γ (in Einheiten von c) und ihre Umkehrung
+ * β = u / √(1 + u²).
  */
-export function betaLinear(t, T, betaEnd) {
-  return betaEnd * clamp01(t / T);
+export function properVelocity(beta) {
+  return beta * lorentzGamma(beta);
+}
+export function betaFromProperVelocity(u) {
+  return u / Math.sqrt(1 + u * u);
+}
+
+/**
+ * Konstante Eigenbeschleunigung von β₀ nach β₁ (β₁ < β₀ heißt Bremsen).
+ *
+ * Bei geradliniger Bewegung mit konstanter Eigenbeschleunigung a ändert sich
+ * die Eigengeschwindigkeit u = β·γ linear mit der Zeit t in S:
+ *
+ *   u(t) = u₀ ± a·t/c       (Verallgemeinerung von β·γ = a·t/c für Start aus der Ruhe)
+ *
+ * (Begründung: Impuls p = mγv, und bei geradliniger Bewegung gilt
+ * dp/dt = m·a mit der Eigenbeschleunigung a.) Daraus folgen die Dauer und,
+ * umgekehrt, die nötige Eigenbeschleunigung:
+ *
+ *   T = (c/a) · |u₁ − u₀|          a = (c/T) · |u₁ − u₀|
+ */
+export function accelerationDuration(a, beta0, beta1) {
+  return (C / a) * Math.abs(properVelocity(beta1) - properVelocity(beta0));
+}
+export function accelerationFromDuration(T, beta0, beta1) {
+  return (C / T) * Math.abs(properVelocity(beta1) - properVelocity(beta0));
+}
+
+/**
+ * β(t) bei konstanter Eigenbeschleunigung von β₀ (t = 0) nach β₁ (t = T):
+ * u wächst bzw. fällt linear von u₀ nach u₁, dann β = u/√(1 + u²).
+ */
+export function betaConstantBetween(t, T, beta0, beta1) {
+  const s = clamp01(t / T);
+  const u0 = properVelocity(beta0);
+  const u1 = properVelocity(beta1);
+  return betaFromProperVelocity(u0 + (u1 - u0) * s);
+}
+
+/**
+ * Linear in β (unphysikalisch, aber didaktisch praktisch):
+ *   β(t) = β₀ + (β₁ − β₀) · t/T   für 0 ≤ t ≤ T
+ */
+export function betaLinear(t, T, beta0, beta1) {
+  return beta0 + (beta1 - beta0) * clamp01(t / T);
 }
 
 /**
  * Weiche Ein-/Ausblendkurve (kubischer "smoothstep"):
- *   β(t) = β_end · (3u² − 2u³)  mit u = t/T
+ *   β(t) = β₀ + (β₁ − β₀) · (3s² − 2s³)  mit s = t/T
  * Start und Ende mit waagrechter Tangente. Ebenfalls rein didaktisch.
  */
-export function betaSmooth(t, T, betaEnd) {
-  const u = clamp01(t / T);
-  return betaEnd * u * u * (3 - 2 * u);
+export function betaSmooth(t, T, beta0, beta1) {
+  const s = clamp01(t / T);
+  return beta0 + (beta1 - beta0) * s * s * (3 - 2 * s);
 }
 
 /** Die drei wählbaren Kurven der Beschleunigungsphase. */
@@ -476,21 +594,21 @@ export const ACCELERATION_CURVES = {
 };
 
 /**
- * β zur Zeit t (in S) für die gewählte Kurve.
- * Damit die drei Kurven vergleichbar sind, laufen "linear" und "smooth" über
- * dieselbe Dauer T bis zum selben End-β wie die konstante Eigenbeschleunigung:
- *   β_end = β_konst(a, T).
+ * β zur Zeit t (in S) für die gewählte Kurve von β₀ nach β₁.
+ * Alle drei Kurven laufen über dieselbe Dauer T; T ergibt sich aus der
+ * konstanten Eigenbeschleunigung (accelerationDuration), damit die Kurven
+ * vergleichbar sind.
  *
  * @param {'constant'|'linear'|'smooth'} curve
- * @param {number} t  Zeit in S in s (0 ≤ t ≤ T)
- * @param {number} a  Eigenbeschleunigung in m/s²
- * @param {number} T  Dauer der Beschleunigungsphase in S in s
+ * @param {number} t      Zeit in S in s (0 ≤ t ≤ T)
+ * @param {number} T      Dauer der Beschleunigungsphase in S in s
+ * @param {number} beta0  Start-β
+ * @param {number} beta1  End-β
  */
-export function accelerationBeta(curve, t, a, T) {
-  if (curve === 'constant') return betaConstantProperAcceleration(a, Math.min(t, T));
-  const betaEnd = betaConstantProperAcceleration(a, T);
-  if (curve === 'linear') return betaLinear(t, T, betaEnd);
-  return betaSmooth(t, T, betaEnd);
+export function accelerationBeta(curve, t, T, beta0, beta1) {
+  if (curve === 'constant') return betaConstantBetween(t, T, beta0, beta1);
+  if (curve === 'linear') return betaLinear(t, T, beta0, beta1);
+  return betaSmooth(t, T, beta0, beta1);
 }
 
 /**

@@ -11,7 +11,16 @@
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
-    <div id="app">
+    <header id="topbar">
+      <span class="title">Optische Effekte nahe c</span>
+      <nav id="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="sim" aria-selected="true">Simulation</button>
+        <button type="button" role="tab" data-tab="overview" aria-selected="false">Übersicht</button>
+      </nav>
+    </header>
+
+    <!-- ===================== Simulation ===================== -->
+    <div id="app" data-view="sim">
       <main id="view">
         <canvas id="canvas"></canvas>
         <img id="cockpit" alt="" hidden />
@@ -19,51 +28,14 @@
       </main>
 
       <aside id="panel">
-        <h1>Optische Effekte nahe c</h1>
-
         <section>
           <h2>Geschwindigkeit</h2>
-          <label class="row" for="beta-slider">β = v/c</label>
-          <div class="row">
-            <input id="beta-slider" type="range" min="0" max="1" step="0.0001" value="0" />
-            <input id="beta-input" type="number" min="0" max="0.999" step="0.001" value="0" />
-          </div>
-          <p class="note">Skala logarithmisch in (1 − β): feiner im oberen Bereich.</p>
+          <div class="beta-control" data-instance="sim"></div>
         </section>
 
         <section>
           <h2>Beschleunigungsphase</h2>
-          <label class="row">Kurve
-            <select id="acc-curve">
-              <option value="constant" selected>konstante Eigenbeschleunigung</option>
-              <option value="linear">linear in β (didaktisch)</option>
-              <option value="smooth">weiche Ein-/Ausblendkurve</option>
-            </select>
-          </label>
-          <label class="row">Beschleunigung a
-            <span><input id="acc-a" type="number" min="0.01" max="1000000" step="any" value="9.81" /> m/s²</span>
-          </label>
-          <input id="acc-a-slider" type="range" min="-1" max="6" step="0.01" value="0.9917" />
-          <label class="row">Dauer (Zeit in S)
-            <span>
-              <input id="acc-duration" type="number" min="0.001" step="any" value="5" />
-              <select id="acc-unit">
-                <option value="1">s</option>
-                <option value="3600">h</option>
-                <option value="86400">Tage</option>
-                <option value="31557600" selected>Jahre</option>
-              </select>
-            </span>
-          </label>
-          <label class="row">Abspielzeit
-            <span><input id="acc-play" type="number" min="1" max="600" step="1" value="20" /> s</span>
-          </label>
-          <div class="row buttons">
-            <button id="acc-start" type="button">▶ Start</button>
-            <button id="acc-pause" type="button">⏸ Pause</button>
-            <button id="acc-reset" type="button">⟲ Zurücksetzen</button>
-          </div>
-          <p class="note" id="acc-info"></p>
+          <div class="accel-control" data-instance="sim"></div>
         </section>
 
         <section>
@@ -71,13 +43,21 @@
           <label class="check"><input id="fx-aberration" type="checkbox" checked /> Aberration (Richtung)</label>
           <label class="check"><input id="fx-doppler" type="checkbox" checked /> Doppler-Effekt (Farbe)</label>
           <label class="check"><input id="fx-beaming" type="checkbox" checked /> Beaming (Helligkeit, Sterne D<sup>−2</sup>)</label>
-          <label class="check"><input id="fx-visible" type="checkbox" /> Nur sichtbares Licht (380–780 nm)</label>
-          <p class="note indent">Aus: Helligkeit über alle Wellenlängen (bolometrisch).
-            An: nur der Anteil des verschobenen Spektrums, den das Auge sieht.</p>
-          <label class="check"><input id="fx-bands" type="checkbox" /> Maximum außerhalb des Sichtbaren kennzeichnen</label>
-          <p class="note indent"><span class="sym">◯</span> Ring: λ<sub>max</sub> &lt; 380 nm (UV) ·
-            <span class="sym">□</span> Quadrat: λ<sub>max</sub> &gt; 780 nm (IR), nach Wien λ<sub>max</sub> = b/T′</p>
-          <label class="check"><input id="fx-window" type="checkbox" checked /> Sichtfeldmarkierung ±16° (Cockpitfenster der Filmszene)</label>
+
+          <div class="radio-group">
+            <span class="group-label">Spektrum</span>
+            <label class="check"><input type="radio" name="spectrum" value="visible" checked /> Nur sichtbares Licht (Auge, 380–780 nm)</label>
+            <label class="check"><input type="radio" name="spectrum" value="full" /> Gesamtes Spektrum (Falschfarben)</label>
+          </div>
+          <p class="note indent" id="spectrum-note-visible">Farbe und Helligkeit so, wie ein Auge sie sähe:
+            Helligkeit nur aus dem sichtbaren Anteil des verschobenen Spektrums.</p>
+          <p class="note indent" id="spectrum-note-full" hidden>Das Spektrum von 50 nm bis 20 µm wird logarithmisch
+            auf 380–780 nm gestaucht (Falschfarben), Helligkeit über alle Wellenlängen (D<sup>−2</sup>).
+            Automatisch gekennzeichnet, wenn weniger als 1 % der Strahlung im Sichtbaren liegt:
+            <span class="sym">◯</span> Ring = praktisch nur UV, <span class="sym">□</span> Quadrat = praktisch nur IR.</p>
+
+          <label class="check"><input id="fx-window" type="checkbox" /> Sichtfeldmarkierung ±16° (Cockpitfenster der Filmszene)</label>
+
           <label class="check"><input id="fx-cockpit" type="checkbox" /> Cockpit-Overlay</label>
           <div id="cockpit-panel" class="subpanel">
             <label class="row">Deckkraft <span><output id="cockpit-opacity-out">90</output> %</span></label>
@@ -89,14 +69,21 @@
             <p class="note" id="cockpit-status"></p>
             <p class="note">Standbild aus dem Film: urheberrechtlich geschützt, nur lokal verwenden.</p>
           </div>
+
           <label class="check"><input id="fx-bodies" type="checkbox" /> Terrell-Körper (Würfel und Kugel)</label>
           <div id="bodies-panel" class="subpanel">
             <div class="row">
               <label class="check"><input id="body-cube" type="checkbox" checked /> Würfel (links)</label>
               <label class="check"><input id="body-sphere" type="checkbox" checked /> Kugel (rechts)</label>
             </div>
-            <label class="row">Richtung ψ in S <span><output id="body-psi-out">90</output>°</span></label>
-            <input id="body-psi" type="range" min="0" max="180" step="1" value="90" />
+            <label class="row">Platzierung
+              <select id="body-placement">
+                <option value="seen" selected>gesehener Winkel ψ′</option>
+                <option value="S">Winkel ψ in S</option>
+              </select>
+            </label>
+            <label class="row"><span id="body-angle-label">Gesehener Winkel ψ′</span> <span><output id="body-angle-out">90</output>°</span></label>
+            <input id="body-angle" type="range" min="1" max="179" step="1" value="90" />
             <label class="row">Entfernung <span><output id="body-dist-out">10</output> Kugelradien</span></label>
             <input id="body-dist" type="range" min="3" max="40" step="0.5" value="10" />
             <label class="row">Beobachter auf z-Achse <span><output id="body-z-out">0</output></span></label>
@@ -105,18 +92,26 @@
             <input id="body-exp" type="range" min="-8" max="4" step="0.1" value="0" />
             <label class="check"><input id="body-uniform" type="checkbox" /> Alle Flächen 5 800 K</label>
             <p class="note">Sonst Würfelflächen: vorn (+z) 9 000 K, hinten (−z) 3 500 K, Seiten 5 800 K.</p>
+            <label class="check"><input id="body-ghost" type="checkbox" checked /> Vergleichswürfel ohne Relativität (Drahtgitter)</label>
+            <p class="note">Ruhender Würfel an derselben Bildstelle und in derselben scheinbaren Entfernung –
+              so sähe der Würfel ohne Relativitätstheorie aus.</p>
+            <table class="mini" id="terrell-info"></table>
             <div class="row buttons">
               <button id="look-cube" type="button">Blick auf Würfel</button>
               <button id="look-sphere" type="button">Blick auf Kugel</button>
             </div>
             <div class="row buttons">
+              <button id="flyby" type="button">▶ Vorbeiflug</button>
               <button id="measure-sphere" type="button">Rundheit der Kugel messen</button>
             </div>
+            <p class="note" id="flyby-note">Vorbeiflug: Der Beobachter fliegt mit β am ruhenden Würfel vorbei
+              (seitlicher Abstand = Entfernung), die Kamera folgt dem Würfel.</p>
             <p class="note" id="measure-result">Selbsttest: Achsenverhältnis des Kugelbilds (1 = Kreis).</p>
           </div>
-          <p class="note footnote">* Bei großem β wandert sichtbares Licht ins UV und Infrarotes ins
+          <p class="note footnote" id="footnote">* Bei großem β wandert sichtbares Licht ins UV und Infrarotes ins
             Sichtbare. Gezeigt wird die Farbe des verschobenen Schwarzkörpers (T′ = T/D); das ist
-            korrekt, solange man das Sternspektrum als vollständiges Planck-Spektrum annimmt.</p>
+            korrekt, solange man das Sternspektrum als vollständiges Planck-Spektrum annimmt.
+            Im Modus „gesamtes Spektrum“ sind die Farben Falschfarben, nicht das, was ein Auge sähe.</p>
         </section>
 
         <section>
@@ -135,10 +130,14 @@
             <select id="star-count">
               <option value="10000" selected>10 000</option>
               <option value="20000">20 000</option>
-              <option value="30000">30 000</option>
               <option value="50000">50 000</option>
+              <option value="100000">100 000</option>
+              <option value="250000">250 000</option>
+              <option value="500000">500 000</option>
+              <option value="1000000">1 000 000</option>
             </select>
           </label>
+          <p class="note">Ab 500 000 Sternen kann es auf schwachen Grafikkarten ruckeln (Bildrate im Debug-Panel).</p>
         </section>
 
         <section>
@@ -155,12 +154,12 @@
           <figure class="chart">
             <figcaption>Lorentzfaktor γ über β</figcaption>
             <canvas id="gamma-graph" aria-label="Graph des Lorentzfaktors γ über β mit Marker beim aktuellen Wert"></canvas>
-            <div class="chart-tip" id="gamma-tip" hidden></div>
+            <div class="chart-tip" hidden></div>
           </figure>
           <figure class="chart" id="beta-t-figure" hidden>
-            <figcaption>β über der Zeit t in S (<span id="beta-t-curve"></span>)</figcaption>
+            <figcaption>β über der Zeit t in S (<span class="curve-name"></span>)</figcaption>
             <canvas id="beta-t-graph" aria-label="Graph von β über der Zeit während der Beschleunigungsphase"></canvas>
-            <div class="chart-tip" id="beta-t-tip" hidden></div>
+            <div class="chart-tip" hidden></div>
           </figure>
         </section>
 
@@ -170,6 +169,73 @@
         </section>
       </aside>
     </div>
+
+    <!-- ===================== Übersicht ===================== -->
+    <div id="overview" data-view="overview" hidden>
+      <div class="ov-controls">
+        <section>
+          <h2>Geschwindigkeit</h2>
+          <div class="beta-control" data-instance="ov"></div>
+        </section>
+        <section>
+          <h2>Beschleunigungsphase</h2>
+          <div class="accel-control" data-instance="ov"></div>
+        </section>
+        <p class="note">Diese Regler sind dieselben wie in der Simulation: Änderungen gelten in beiden Ansichten.
+          Alle Graphen markieren das aktuelle β; alle Tabellen rechnen mit dem aktuellen β.</p>
+      </div>
+
+      <div class="ov-grid">
+        <figure class="chart ov-chart">
+          <figcaption>Lorentzfaktor γ</figcaption>
+          <canvas id="ov-gamma"></canvas>
+          <div class="chart-tip" hidden></div>
+        </figure>
+        <figure class="chart ov-chart">
+          <figcaption>Dopplerfaktor D = λ′/λ (logarithmisch)</figcaption>
+          <div class="legend" id="ov-doppler-legend"></div>
+          <canvas id="ov-doppler"></canvas>
+          <div class="chart-tip" hidden></div>
+        </figure>
+        <figure class="chart ov-chart">
+          <figcaption>Gesehener Winkel ψ′ eines Sterns, der in S quer (ψ = 90°) steht</figcaption>
+          <canvas id="ov-angle"></canvas>
+          <div class="chart-tip" hidden></div>
+        </figure>
+        <figure class="chart ov-chart">
+          <figcaption>Beaming nach vorn (logarithmisch)</figcaption>
+          <div class="legend" id="ov-beaming-legend"></div>
+          <canvas id="ov-beaming"></canvas>
+          <div class="chart-tip" hidden></div>
+        </figure>
+        <figure class="chart ov-chart">
+          <figcaption>Sterne mit bloßem Auge sichtbar (≤ 6,5 mag im sichtbaren Licht)</figcaption>
+          <div class="legend" id="ov-stars-legend"></div>
+          <canvas id="ov-stars"></canvas>
+          <div class="chart-tip" hidden></div>
+          <p class="note" id="ov-stars-note"></p>
+        </figure>
+        <figure class="chart ov-chart" id="ov-beta-t-figure" hidden>
+          <figcaption>β über der Zeit t in S (<span class="curve-name"></span>)</figcaption>
+          <canvas id="ov-beta-t"></canvas>
+          <div class="chart-tip" hidden></div>
+        </figure>
+
+        <section class="ov-table">
+          <h2>Aberration</h2>
+          <div class="table-wrap" id="table-aberration"></div>
+        </section>
+        <section class="ov-table">
+          <h2>Terrell-Drehung</h2>
+          <div class="table-wrap" id="table-terrell"></div>
+        </section>
+        <section class="ov-table">
+          <h2>Doppler-Effekt</h2>
+          <div class="table-wrap" id="table-doppler"></div>
+        </section>
+      </div>
+    </div>
+
     <footer id="footer">
       Simulation erstellt mit Claude Code (KI). Physikalische Grundlagen siehe Kapitel 3 der Seminararbeit.
     </footer>
