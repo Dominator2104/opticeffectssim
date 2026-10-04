@@ -178,11 +178,12 @@ vec4 projectDirection(vec3 dir, float dist) {
 /** Entfernung, unter der Sterne in den Tiefenpuffer geschrieben werden ("unendlich weit"). */
 const STAR_DISTANCE = 1.0e6;
 
-const STAR_VERTEX = /* glsl */ `
-${GLSL_PHYSICS}
-${GLSL_BLACKBODY}
-${GLSL_PROJECTION}
-uniform bool uAberration;
+/**
+ * Gemeinsamer Teil beider Sternfelder (Himmelskugel und 3D-Modus):
+ * aus der Richtung n in S, der Bestrahlungsstärke F (ohne relativistische
+ * Effekte) und der Temperatur T werden Farbe, Helligkeit und Kennzeichnung.
+ */
+const GLSL_STAR_APPEARANCE = /* glsl */ `
 uniform bool uDoppler;
 uniform bool uBeaming;
 uniform bool uFullSpectrum; // aus: nur sichtbares Licht (Auge), an: gesamtes Spektrum (Falschfarben)
@@ -192,33 +193,26 @@ uniform float uMaxSize;    // größte Punktgröße in Pixeln (Bildschirm ist ni
 uniform float uMarkSize;   // Größe der UV/IR-Markierung in Pixeln
 uniform float uPixelRatio;
 
-in float aFlux;            // Grundhelligkeit F relativ zu 0 mag (stars.js)
-in float aTemperature;     // Temperatur T des Sterns in S (stars.js)
 out vec3 vColor;
 out float vIntensity;
 out float vCoreFraction;   // Anteil des Lichtflecks an der Punktgröße
 out float vMark;           // 0 = keine Markierung, 1 = nur UV (Ring), 2 = nur IR (Quadrat)
 out float vSpritePx;
 
-void main() {
-  vec3 n = normalize(position);                 // Richtung zum Stern in S
-  vec3 nSeen = uAberration ? aberrateDirection(n) : n;
-  gl_Position = projectDirection(nSeen, ${STAR_DISTANCE.toFixed(1)});
-
+void starAppearance(vec3 n, float baseFlux, float T) {
   // D gehört zur tatsächlichen Richtung n in S (cos ψ = n.z), unabhängig davon,
   // ob die Aberration gerade angezeigt wird.
   float D = dopplerFactor(n.z);
 
   // Farbe: Schwarzkörper bei der scheinbaren Temperatur T' = T/D (Doppler an).
   // Nur sichtbar: Farbe, die das Auge sähe. Gesamtes Spektrum: Falschfarbe.
-  float T = aTemperature;
   float Tseen = uDoppler ? apparentTemperature(T, D) : T;
   vColor = uFullSpectrum ? falseColorLookup(Tseen) : blackbodyLookup(Tseen).rgb;
 
   // Helligkeit: Sterne sind Punkte → D^(−2), nicht D^(−4)!
   // Nur sichtbar: zusätzlich der Anteil im Sichtbaren (zusammen D²·Y(T')/Y(T)).
   // Gesamtes Spektrum: bolometrisch, also nur D^(−2).
-  float flux = aFlux;
+  float flux = baseFlux;
   if (uBeaming) flux *= beamingPointSource(D);
   if (!uFullSpectrum) flux *= visibleSpectralFactor(T, Tseen);
 
@@ -245,6 +239,57 @@ void main() {
   vCoreFraction = core / sprite;
   vSpritePx = sprite * uPixelRatio;
   gl_PointSize = vSpritePx;
+}
+`;
+
+/** Himmelskugel: Sterne als Richtungen (unendlich weit), Helligkeit fest. */
+const STAR_VERTEX = /* glsl */ `
+${GLSL_PHYSICS}
+${GLSL_BLACKBODY}
+${GLSL_PROJECTION}
+${GLSL_STAR_APPEARANCE}
+uniform bool uAberration;
+in float aFlux;            // Grundhelligkeit F relativ zu 0 mag (stars.js)
+in float aTemperature;     // Temperatur T des Sterns in S (stars.js)
+
+void main() {
+  vec3 n = normalize(position);                 // Richtung zum Stern in S
+  vec3 nSeen = uAberration ? aberrateDirection(n) : n;
+  gl_Position = projectDirection(nSeen, ${STAR_DISTANCE.toFixed(1)});
+  starAppearance(n, aFlux, aTemperature);
+}
+`;
+
+/**
+ * 3D-Modus: jeder Stern hat eine Position in S (in Lichtjahren). Richtung und
+ * Entfernung werden von der AKTUELLEN Beobachterposition aus berechnet; die
+ * Sterne ruhen in S, deshalb ist das die Richtung, aus der ihr Licht in S
+ * ankommt. Danach dieselbe Aberration, derselbe Doppler-Effekt, dasselbe
+ * Beaming wie bei der Himmelskugel.
+ */
+const STAR3D_VERTEX = /* glsl */ `
+${GLSL_PHYSICS}
+${GLSL_BLACKBODY}
+${GLSL_PROJECTION}
+${GLSL_STAR_APPEARANCE}
+uniform bool uAberration;
+uniform vec3 uCellOffset;  // Zellursprung minus Beobachterposition in S (Lj), in JavaScript doppelt genau
+in float aAbsFlux;         // 10^(−0,4·M): Bestrahlungsstärke in 10 pc relativ zu 0 mag (stars3d.js)
+in float aTemperature;
+
+const float TEN_PC_LY = ${(10 * 3.26156).toFixed(5)};
+
+void main() {
+  vec3 p = position + uCellOffset;              // Stern relativ zum Beobachter in S
+  float r = max(length(p), 1.0e-4);
+  vec3 n = p / r;                               // Richtung zum Stern in S
+  vec3 nSeen = uAberration ? aberrateDirection(n) : n;
+  // Tiefe: Entfernung des Emissionsereignisses in S' (r/D), wie bei den Körpern
+  float dist = uAberration ? r / dopplerFactor(n.z) : r;
+  gl_Position = projectDirection(nSeen, dist);
+  // physics.fluxFromAbsoluteMagnitude: F = 10^(−0,4·M) · (10 pc / r)²
+  float flux = aAbsFlux * (TEN_PC_LY / r) * (TEN_PC_LY / r);
+  starAppearance(n, flux, aTemperature);
 }
 `;
 
@@ -298,6 +343,99 @@ function createStarPoints(stars, sharedUniforms) {
   const points = new THREE.Points(geometry, material);
   points.frustumCulled = false;
   return points;
+}
+
+/**
+ * 3D-Sternfeld: eine Punktwolke pro Zelle (stars3d.js). Jede Zelle hat ihren
+ * eigenen Versatz uCellOffset = Zellursprung − Beobachter, in JavaScript mit
+ * doppelter Genauigkeit berechnet, damit die Positionen auch nach langen
+ * Flügen genau bleiben.
+ */
+function createStarField3D(sharedUniforms) {
+  const group = new THREE.Group();
+  const cells = new Map(); // "i,j,k" → { points, origin: [x, y, z], data }
+
+  function makeCell(data, sizeLy) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
+    geometry.setAttribute('aAbsFlux', new THREE.BufferAttribute(data.absFluxes, 1));
+    geometry.setAttribute('aTemperature', new THREE.BufferAttribute(data.temperatures, 1));
+    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), Infinity);
+    const material = new THREE.ShaderMaterial({
+      glslVersion: THREE.GLSL3,
+      vertexShader: STAR3D_VERTEX,
+      fragmentShader: STAR_FRAGMENT,
+      uniforms: { ...sharedUniforms, uCellOffset: { value: new THREE.Vector3() } },
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: true,
+      transparent: true,
+    });
+    const points = new THREE.Points(geometry, material);
+    points.frustumCulled = false;
+    group.add(points);
+    return { points, origin: [data.i * sizeLy, data.j * sizeLy, data.k * sizeLy], data };
+  }
+
+  function dispose(key) {
+    const c = cells.get(key);
+    group.remove(c.points);
+    c.points.geometry.dispose();
+    c.points.material.dispose();
+    cells.delete(key);
+  }
+
+  return {
+    group,
+    /**
+     * @param {number[]} observer  Beobachterposition in S (Lj)
+     * @param {number[][]} needed  benötigte Zellen [i, j, k]
+     * @param {(i,j,k)=>object} generate  erzeugt die Daten einer Zelle
+     * @param {number} sizeLy      Kantenlänge
+     * @param {number} maxNew      höchstens so viele neue Zellen pro Bild erzeugen
+     */
+    update(observer, needed, generate, sizeLy, maxNew = 9) {
+      const keep = new Set(needed.map((c) => c.join(',')));
+      for (const key of [...cells.keys()]) if (!keep.has(key)) dispose(key);
+      let created = 0;
+      for (const [i, j, k] of needed) {
+        const key = `${i},${j},${k}`;
+        if (cells.has(key) || created >= maxNew) continue;
+        cells.set(key, makeCell(generate(i, j, k), sizeLy));
+        created++;
+      }
+      for (const c of cells.values()) {
+        c.points.material.uniforms.uCellOffset.value.set(
+          c.origin[0] - observer[0],
+          c.origin[1] - observer[1],
+          c.origin[2] - observer[2],
+        );
+      }
+    },
+    clear() {
+      for (const key of [...cells.keys()]) dispose(key);
+    },
+    /** Anzahl geladener Sterne und Entfernung des nächsten Sterns (Lj). */
+    stats(observer) {
+      let count = 0;
+      let nearest = Infinity;
+      for (const c of cells.values()) {
+        const { positions } = c.data;
+        count += c.data.count;
+        const ox = c.origin[0] - observer[0];
+        const oy = c.origin[1] - observer[1];
+        const oz = c.origin[2] - observer[2];
+        for (let n = 0; n < positions.length; n += 3) {
+          const x = positions[n] + ox;
+          const y = positions[n + 1] + oy;
+          const z = positions[n + 2] + oz;
+          const d2 = x * x + y * y + z * z;
+          if (d2 < nearest) nearest = d2;
+        }
+      }
+      return { count, nearest: Math.sqrt(nearest) };
+    },
+  };
 }
 
 /* ------------------------------------------------------------------------- */
@@ -634,6 +772,8 @@ export function createRenderer(canvas) {
   const cube = createBodyMesh(createCubeGeometry(2), uniforms, [4, 4]);
   const sphere = createBodyMesh(createSphereGeometry(1), uniforms, [16, 8]);
   scene.add(cube, sphere);
+  const field3d = createStarField3D(uniforms);
+  scene.add(field3d.group);
   const windowMarker = createWindowMarker(uniforms, WINDOW_HALF_ANGLE_DEG);
   const ghost = createGhostCube(uniforms);
   scene.add(windowMarker, ghost);
@@ -688,6 +828,9 @@ export function createRenderer(canvas) {
     uniforms.uUniformTemperature.value = b.uniformTemperature;
     uniforms.uRadiance.value = b.radiance;
     windowMarker.visible = s.windowMarker;
+    // Himmelskugel oder 3D-Sternfeld
+    if (starPoints) starPoints.visible = !s.mode3d;
+    field3d.group.visible = !!s.mode3d;
 
     renderer.setRenderTarget(target);
     renderer.setClearColor(0x000000, 1);
@@ -745,5 +888,5 @@ export function createRenderer(canvas) {
     return { ratio: Math.sqrt((tr / 2 + disc) / (tr / 2 - disc)), radiusPx: Math.sqrt(n / Math.PI) };
   }
 
-  return { renderer, setStars, resize, render, measureSphereRoundness };
+  return { renderer, setStars, resize, render, measureSphereRoundness, field3d };
 }

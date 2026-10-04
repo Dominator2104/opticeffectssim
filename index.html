@@ -39,6 +39,52 @@
         </section>
 
         <section>
+          <h2>3D-Flug</h2>
+          <label class="check"><input id="mode3d" type="checkbox" /> 3D-Modus: durch das Sternfeld fliegen</label>
+          <div id="mode3d-panel" class="subpanel hidden">
+            <label class="row">Zeitfaktor (Bordzeit τ)
+              <select id="time-factor">
+                <option value="0.01">Zeitlupe 1 : 100</option>
+                <option value="0.1">Zeitlupe 1 : 10</option>
+                <option value="1">Echtzeit</option>
+                <option value="60">1 s = 1 Minute</option>
+                <option value="3600">1 s = 1 Stunde</option>
+                <option value="86400">1 s = 1 Tag</option>
+                <option value="2629800">1 s = 1 Monat</option>
+                <option value="31557600" selected>1 s = 1 Jahr</option>
+                <option value="315576000">1 s = 10 Jahre</option>
+                <option value="3155760000">1 s = 100 Jahre</option>
+              </select>
+            </label>
+            <div class="row buttons">
+              <button id="flight-play" type="button">▶ Flug</button>
+              <button id="flight-pause" type="button">⏸ Anhalten</button>
+              <button id="flight-reset" type="button">⟲ Zum Start</button>
+            </div>
+            <label class="row">Sterndichte
+              <select id="density3d">
+                <option value="0.1">0,1 × (weniger Sterne)</option>
+                <option value="0.25">0,25 ×</option>
+                <option value="0.5">0,5 ×</option>
+                <option value="1" selected>1 × realistisch (0,004 / Lj³)</option>
+                <option value="2">2 ×</option>
+                <option value="4">4 × (mehr Sterne)</option>
+              </select>
+            </label>
+            <label class="row">Zellgröße (Kantenlänge) <span><output id="cell-size-out">100</output> Lj</span></label>
+            <input id="cell-size" type="range" min="20" max="250" step="5" value="100" />
+            <table class="mini" id="flight-info"></table>
+            <p class="note">Die Sterne ruhen in S an festen Orten; das Schiff fliegt mit β in +z.
+              Der Raum ist in Würfelzellen geteilt, jede mit eigenem Zufallsstartwert: Das Sternfeld
+              wiederholt sich nie, ist aber reproduzierbar. Geladen sind die 27 Zellen um das Schiff.
+              Echte Sternabstände sind Lichtjahre – sichtbare Bewegung erst im Zeitraffer
+              (etwa ab „1 s = 1 Jahr“). Helligkeit nach Entfernung (1/r²) und Leuchtkraft
+              (Hauptreihe nach Spektralklasse, 1 % Rote Riesen). Im 3D-Modus sind alle Längen
+              Lichtjahre; Würfel und Kugel (Kante bzw. Durchmesser 2 Lj) stehen fest im Raum.</p>
+          </div>
+        </section>
+
+        <section>
           <h2>Effekte</h2>
           <label class="check"><input id="fx-aberration" type="checkbox" checked /> Aberration (Richtung)</label>
           <label class="check"><input id="fx-doppler" type="checkbox" checked /> Doppler-Effekt (Farbe)</label>
@@ -100,6 +146,9 @@
               <button id="look-cube" type="button">Blick auf Würfel</button>
               <button id="look-sphere" type="button">Blick auf Kugel</button>
             </div>
+            <div class="row buttons" id="place3d-row" hidden>
+              <button id="place3d" type="button">Körper vor mir platzieren (3D)</button>
+            </div>
             <div class="row buttons">
               <button id="flyby" type="button">▶ Vorbeiflug</button>
               <button id="measure-sphere" type="button">Rundheit der Kugel messen</button>
@@ -137,7 +186,8 @@
               <option value="1000000">1 000 000</option>
             </select>
           </label>
-          <p class="note">Ab 500 000 Sternen kann es auf schwachen Grafikkarten ruckeln (Bildrate im Debug-Panel).</p>
+          <p class="note">Gilt für die Himmelskugel. Ab 500 000 Sternen kann es auf schwachen Grafikkarten ruckeln
+            (Bildrate im Debug-Panel). Im 3D-Modus bestimmen Sterndichte und Zellgröße die Anzahl.</p>
         </section>
 
         <section>

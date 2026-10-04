@@ -23,9 +23,13 @@ import {
   beamingExtended,
   inverseAberrationCosPsi,
   properTimeNumeric,
+  coordinateTimeStep,
+  distanceStepLy,
+  SECONDS_PER_YEAR,
   deg,
   rad,
 } from './physics.js';
+import { generateCell, neededCells, REAL_DENSITY_PER_LY3 } from './stars3d.js';
 import { bodyCenter } from './bodies.js';
 import { visibleLuminance, visibleFraction } from './blackbody.js';
 import { generateStars } from './stars.js';
@@ -70,6 +74,19 @@ const state = {
     uniformTemperature: false,
     ghost: true,
     flyby: { running: false, z: 0 },
+  },
+  // 3D-Modus: Flug durch ein Sternfeld mit echten Positionen (Längen in Lj)
+  flight: {
+    enabled: false,
+    running: false,
+    timeFactor: SECONDS_PER_YEAR, // Sekunden Bordzeit τ pro echter Sekunde
+    density: 1, // Vielfaches der realistischen Sterndichte
+    cellSize: 100, // Kantenlänge der Zellen in Lj
+    observer: [0, 0, 0], // Beobachterposition in S (Lj)
+    tau: 0, // vergangene Bordzeit in s
+    t: 0, // vergangene Zeit in S in s
+    distance: 0, // zurückgelegte Strecke in S (Lj)
+    anchors: null, // feste Positionen der Körper in S (Lj)
   },
   // Beschleunigungsphase (Werte setzt ui.js aus den Bedienelementen)
   accel: {
@@ -147,7 +164,30 @@ const ui = createUI(state, {
     if (!acc.active || acc.t >= T) acc.t = 0; // am Ende oder neu: von vorn
     acc.active = true;
     acc.running = true;
+    if (state.flight.enabled) state.flight.running = true; // im 3D-Modus läuft sie mit der Flug-Uhr
     ui.setBeta(accelBetaAt(acc, acc.t));
+  },
+  onMode3d(enabled) {
+    if (enabled && !state.flight.anchors) placeBodies3d();
+    if (!enabled) {
+      state.flight.running = false;
+      view.field3d.clear();
+    }
+  },
+  onFlightReset() {
+    const f = state.flight;
+    f.running = false;
+    f.observer = [0, 0, 0];
+    f.tau = 0;
+    f.t = 0;
+    f.distance = 0;
+    placeBodies3d();
+  },
+  onField3dChange() {
+    view.field3d.clear(); // Zellen mit neuer Größe bzw. Dichte erzeugen
+  },
+  onPlaceBodies3d() {
+    placeBodies3d();
   },
   onTab(tab) {
     if (tab === 'sim') view.resize();
@@ -179,6 +219,31 @@ const FLYBY_HALF_LENGTH = 4;
  */
 function bodyLayout() {
   const b = state.bodies;
+  const f = state.flight;
+  if (f.enabled && f.anchors) {
+    // 3D-Modus: Körper fest im Raum, Mittelpunkt relativ zum Beobachter
+    const rel = (a) => a.map((v, i) => v - f.observer[i]);
+    return withGhost(rel(f.anchors.cube), rel(f.anchors.sphere));
+  }
+  return relativeLayout();
+}
+
+/**
+ * 3D-Modus: Körper an der Stelle festmachen, an der sie bei der aktuellen
+ * Platzierung (ψ' bzw. ψ, Entfernung) gerade stehen.
+ */
+function placeBodies3d() {
+  const L = relativeLayout();
+  const o = state.flight.observer;
+  state.flight.anchors = {
+    cube: L.cubeCenter.map((v, i) => v + o[i]),
+    sphere: L.sphereCenter.map((v, i) => v + o[i]),
+  };
+}
+
+/** Platzierung relativ zum Beobachter (Himmelskugel-Modus und Vorlage für 3D). */
+function relativeLayout() {
+  const b = state.bodies;
   let psiS;
   let dist = b.distance;
   let obsZ = b.observerZ;
@@ -190,9 +255,11 @@ function bodyLayout() {
   } else {
     psiS = rad(b.angleDeg);
   }
-  const cubeCenter = bodyCenter(psiS, 0, dist, obsZ);
-  const sphereCenter = bodyCenter(psiS, Math.PI, dist, obsZ);
+  return withGhost(bodyCenter(psiS, 0, dist, obsZ), bodyCenter(psiS, Math.PI, dist, obsZ));
+}
 
+/** Ergänzt den Vergleichswürfel und die Winkel des Würfels. */
+function withGhost(cubeCenter, sphereCenter) {
   // Vergleichswürfel: ruhender Würfel an der gesehenen Stelle des Würfelmittelpunkts,
   // in der Entfernung r/D des Emissionsereignisses in S' (damit gleich groß)
   const r = Math.hypot(...cubeCenter);
@@ -244,7 +311,9 @@ function frame(now) {
 
   // Beschleunigungsphase: Zeit in S weiterzählen, der β-Regler folgt der Kurve
   const acc = state.accel;
-  if (acc.running) {
+  if (state.flight.enabled) {
+    advanceFlight(dt);
+  } else if (acc.running) {
     const { T, valid } = accelTiming(acc);
     if (!valid) {
       acc.running = false;
@@ -257,6 +326,10 @@ function frame(now) {
 
   // Vorbeiflug: Beobachter auf der z-Achse bewegen, Kamera folgt dem Würfel
   const fly = state.bodies.flyby;
+  if (fly.running && state.flight.enabled) {
+    fly.running = false;
+    ui.setFlybyRunning(false);
+  }
   if (fly.running) {
     fly.elapsed += dt;
     const s = Math.min(1, fly.elapsed / FLYBY_SECONDS);
@@ -271,6 +344,7 @@ function frame(now) {
   if (state.tab === 'sim') {
     view.render(renderState());
     updateDebug(debugRows());
+    if (state.flight.enabled) updateFlightInfo();
     simCharts.update(state);
   } else {
     overviewView.update(state, stars);
@@ -278,6 +352,62 @@ function frame(now) {
   updateAccelInfo();
 
   requestAnimationFrame(frame);
+}
+
+/**
+ * 3D-Modus: Die Flug-Uhr läuft in Bordzeit τ mit dem gewählten Zeitfaktor.
+ * Pro Schritt: dt (in S) = γ·dτ, Strecke in S = β·c·dt (physics.js).
+ * Eine laufende Beschleunigungsphase rückt um dt (Zeit in S) weiter.
+ * Große Schritte werden in Teilschritte zerlegt, damit β(t) genau folgt.
+ */
+function advanceFlight(dtReal) {
+  const f = state.flight;
+  const acc = state.accel;
+  if (f.running) {
+    const dTauTotal = dtReal * f.timeFactor;
+    const steps = acc.running ? 32 : 1;
+    for (let k = 0; k < steps; k++) {
+      const dTau = dTauTotal / steps;
+      const dtS = coordinateTimeStep(state.beta, dTau);
+      const dz = distanceStepLy(state.beta, dtS / SECONDS_PER_YEAR);
+      f.observer[2] += dz;
+      f.distance += dz;
+      f.tau += dTau;
+      f.t += dtS;
+      if (acc.running) {
+        const { T, valid } = accelTiming(acc);
+        if (!valid) {
+          acc.running = false;
+        } else {
+          acc.t = Math.min(T, acc.t + dtS);
+          if (acc.t >= T) acc.running = false;
+          ui.setBeta(accelBetaAt(acc, acc.t));
+        }
+      }
+    }
+  }
+  // benötigte Zellen um das Schiff laden, entfernte freigeben
+  const L = f.cellSize;
+  const density = REAL_DENSITY_PER_LY3 * f.density;
+  view.field3d.update(f.observer, neededCells(f.observer, L, 1), (i, j, k) => generateCell(i, j, k, L, density), L);
+}
+
+let flightStats = { count: 0, nearest: Infinity };
+let statsFrame = 0;
+
+function updateFlightInfo() {
+  const f = state.flight;
+  if (statsFrame++ % 20 === 0) flightStats = view.field3d.stats(f.observer);
+  const yr = SECONDS_PER_YEAR;
+  const timeText = (s) => (s < 3600 ? `${num(s, 3)} s` : s < 86400 * 2 ? `${num(s / 3600, 3)} h` : s < yr ? `${num(s / 86400, 3)} Tage` : `${num(s / yr, 4)} Jahre`);
+  ui.setFlightInfo([
+    ['Bordzeit τ', timeText(f.tau)],
+    ['Zeit in S', timeText(f.t)],
+    ['Strecke in S', `${num(f.distance, 4)} Lj`],
+    ['Sterne geladen', flightStats.count.toLocaleString('de-DE')],
+    ['nächster Stern', Number.isFinite(flightStats.nearest) ? `${num(flightStats.nearest, 3)} Lj` : '–'],
+    ['Flug', f.running ? 'läuft' : 'angehalten'],
+  ]);
 }
 
 /** Zustand für den Renderer zusammenstellen. */
@@ -292,6 +422,7 @@ function renderState() {
     doppler: state.doppler,
     beaming: state.beaming,
     spectrum: state.spectrum,
+    mode3d: state.flight.enabled,
     windowMarker: state.windowMarker,
     projection: state.projection,
     fovDeg: state.fovDeg,
@@ -387,7 +518,8 @@ function debugRows() {
     ['  t in S / τ an Bord', acc.active
       ? `${formatTime(acc.t, acc.unitS, acc.unitName)} / ${formatTime(properTimeNumeric((t) => accelBetaAt(acc, t), acc.t), acc.unitS, acc.unitName)}`
       : '–'],
-    ['Sterne', state.starCount.toLocaleString('de-DE')],
+    ['Modus', state.flight.enabled ? '3D-Flug' : 'Himmelskugel'],
+    ['Sterne', state.flight.enabled ? `${flightStats.count.toLocaleString('de-DE')} (3D)` : state.starCount.toLocaleString('de-DE')],
     ['Bildrate', `${fps.toFixed(0)} Bilder/s`],
   ];
 }
