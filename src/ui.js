@@ -180,6 +180,9 @@ export function createUI(state, cb) {
       set('a', valid ? fieldNumber(acc.a) : '–');
       set('duration', valid ? fieldNumber(acc.durationS / acc.unitS) : '–');
       set('play', String(acc.playSeconds));
+      // im 3D-Modus läuft die Beschleunigung mit dem Zeitfaktor des Flugs
+      f('play').readOnly = !!state.flight?.enabled;
+      f('play').title = state.flight?.enabled ? 'Im 3D-Modus gilt der Zeitfaktor des 3D-Flugs' : '';
       // berechnete Größe nur anzeigen, nicht eingeben
       f('a').readOnly = acc.mode !== 'acceleration';
       f('duration').readOnly = acc.mode !== 'duration';
@@ -233,6 +236,31 @@ export function createUI(state, cb) {
       cb.onTab(state.tab);
     });
   }
+
+  // ---- 3D-Flug ----
+  const flight = state.flight;
+  bindCheckbox('mode3d', (v) => {
+    flight.enabled = v;
+    $('mode3d-panel').classList.toggle('hidden', !v);
+    $('place3d-row').hidden = !v;
+    $('flyby').disabled = v;
+    cb.onMode3d(v);
+    refreshAccel(null);
+  });
+  $('time-factor').addEventListener('change', (e) => (flight.timeFactor = Number(e.target.value)));
+  flight.timeFactor = Number($('time-factor').value);
+  $('flight-play').addEventListener('click', () => (flight.running = true));
+  $('flight-pause').addEventListener('click', () => (flight.running = false));
+  $('flight-reset').addEventListener('click', () => cb.onFlightReset());
+  $('density3d').addEventListener('change', (e) => {
+    flight.density = Number(e.target.value);
+    cb.onField3dChange();
+  });
+  flight.density = Number($('density3d').value);
+  const cellSize = $('cell-size');
+  bindRange('cell-size', 'cell-size-out', (v) => (flight.cellSize = v), 0);
+  cellSize.addEventListener('change', () => cb.onField3dChange());
+  $('place3d').addEventListener('click', () => cb.onPlaceBodies3d());
 
   // ---- Effekte ----
   bindCheckbox('fx-aberration', (v) => (state.aberration = v));
@@ -329,6 +357,9 @@ export function createUI(state, cb) {
     },
     setTerrellInfo(rows) {
       fillTable($('terrell-info'), rows);
+    },
+    setFlightInfo(rows) {
+      fillTable($('flight-info'), rows);
     },
   };
 }

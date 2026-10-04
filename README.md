@@ -125,6 +125,9 @@ welche Funktion aus `physics.js` sie übersetzt.
 | Eigenzeit an Bord | `τ = ∫ dt/γ` (numerisch); geschlossen `τ = (c/a)·arsinh(at/c)` | `properTimeNumeric`, `properTimeConstantAcceleration` | Zeitdilatation |
 | Helligkeit nur im Sichtbaren (Zusatz) | Stern: `D²·Y(T')/Y(T)`, Fläche: `Y(T')/Y(T)` | `beamingPointSourceVisible`, `beamingExtendedVisible`, `visibleSpectralFactor` | Herleitung im Kommentar; Probe mit `Y ∝ T⁴` ergibt wieder `D⁻²` bzw. `D⁻⁴` (getestet) |
 | Wien | `λ_max = b/T`, `b = 2,897771955·10⁻³ m·K` | `wienPeakWavelengthNm` | CODATA 2018 |
+| 3D-Flug: Zeitdilatation | `dt = γ·dτ` (Zeitsteuerung in Bordzeit τ) | `coordinateTimeStep` | Zeitdilatation |
+| 3D-Flug: Strecke in S | `ds = β·c·dt`, in Lj und Jahren `ds = β·dt` | `distanceStepLy` | — |
+| 3D-Flug: Helligkeit nach Entfernung | `F = 10^(−0,4·M)·(10 pc / r)²` (Entfernungsmodul, 1/r²) | `fluxFromAbsoluteMagnitude` | Entfernungsmodul `m = M + 5·log10(r/10 pc)` |
 | Anteil im Sichtbaren | `f(T) = ∫₃₈₀⁷⁸⁰ B_λ dλ / (σT⁴/π)` | `visibleFraction` (blackbody.js) | Stefan-Boltzmann; Kennzeichnung „nur UV/IR“ bei `f < 1 %` |
 
 Farbe (`src/blackbody.js`): Planck-Spektrum `B_λ(λ, T)` wird über 380–780 nm
@@ -152,7 +155,7 @@ Spektrum des Sterns als vollständiges Planck-Spektrum annimmt.
 ## Tests
 
 `npm test` führt `tests/physics.test.js` und `tests/blackbody.test.js` aus
-(44 Tests). Sollwerte bei β = 0,9:
+(50 Tests). Sollwerte bei β = 0,9:
 
 | Größe | Sollwert |
 |---|---|
@@ -170,7 +173,8 @@ Kugel bleibt nach der Aberration ein Kreis; Farborte von Normlichtart A
 (2 856 K) und des Planck-Punkts bei 6 500 K; Eigenzeit numerisch = geschlossene
 Form; Beschleunigung zwischen β₀ und β₁ (Dauer ↔ a, Bremsen, `u = βγ` linear);
 Terrell-Drehwinkel `arcsin β` und Verkürzung `1/γ` bei `ψ' = 90°`; Sichtbarkeitsanteil
-und Falschfarben; Zählung der mit bloßem Auge sichtbaren Sterne.
+und Falschfarben; Zählung der mit bloßem Auge sichtbaren Sterne; 3D-Modus (`tests/stars3d.test.js`):
+`dt = γ·dτ`, Strecke, Entfernungsmodul, Reproduzierbarkeit und Anzahl der Sterne je Zelle.
 
 Zusätzlich im Browser geprüft (während der Entwicklung, nicht Teil von `npm test`):
 
@@ -214,8 +218,18 @@ Beschleunigungsphase sind in beiden vorhanden und immer synchron.
   der Unterschied ist die Terrell-Drehung. Angezeigt werden ψ, ψ', Drehwinkel α und
   scheinbare Verkürzung. **Vorbeiflug:** Der Beobachter fliegt am ruhenden Würfel
   vorbei, die Kamera folgt ihm.
+- **3D-Flug (Schalter, Vorgabe aus):** Statt der Himmelskugel bekommt jeder Stern
+  eine feste Position in `S`, und das Schiff fliegt mit β in +z hindurch. In jedem
+  Bild werden Richtung und Entfernung von der aktuellen Position aus berechnet;
+  dann dieselbe Aberration, derselbe Doppler-Effekt und dasselbe Beaming, dazu
+  die Helligkeit nach Entfernung (1/r²). Zeitsteuerung in Bordzeit τ: Zeitlupe
+  1:100 und 1:10, Echtzeit, Zeitraffer bis 1 s = 100 Jahre; Flug starten,
+  anhalten, zum Start zurück. Eine Beschleunigungsphase läuft im 3D-Modus mit
+  dieser Uhr. Sterndichte 0,1× bis 4× der realistischen Dichte (0,004 Sterne/Lj³),
+  Zellgröße (Kantenlänge) 20–250 Lj. Angezeigt werden τ, t in `S`, Strecke,
+  geladene Sterne und Abstand zum nächsten Stern.
 - **Ansicht:** Projektion (Perspektive / stereografisch), Sichtfeld (Vorgabe 60°),
-  Belichtung, Sternzahl (10 000 bis 1 000 000). Umschauen durch Ziehen mit der
+  Belichtung, Sternzahl der Himmelskugel (10 000 bis 1 000 000). Umschauen durch Ziehen mit der
   Maus, Doppelklick schaut wieder nach vorn.
 - **Standbild speichern** als PNG, wahlweise mit Werten und KI-Hinweis im Bild.
 - **Graphen:** γ über β mit Marker; während der Beschleunigungsphase β über t.
@@ -276,6 +290,15 @@ Damit klar ist, was aus einer Formel folgt und was nur Darstellung ist:
   nicht in die Farbe ein.
 - **Sichtbare Sterne (Übersicht):** Das Sternfeld enthält nur Sterne bis 6,5 mag in
   Ruhe. Schwächere Sterne, die nach vorn heller würden, kommen darin nicht vor.
+- **3D-Sternfeld:** Der Raum ist in Würfelzellen geteilt; jede Zelle erzeugt ihre
+  Sterne mit einem Zufallsstartwert aus ihren Koordinaten (`src/stars3d.js`). So ist
+  das Feld unendlich, wiederholt sich nie und ist reproduzierbar. Geladen sind die
+  27 Zellen um das Schiff (Sichtweite mindestens eine Kantenlänge). Leuchtkraft:
+  Hauptreihe mit gerundeten Richtwerten der absoluten Helligkeit je Temperatur nach
+  Pecaut & Mamajek (2013), Streuung 0,3 mag, dazu 1 % Rote Riesen (vereinfachtes
+  Modell). Sehr weit entfernte leuchtstarke Sterne außerhalb der geladenen Zellen
+  fehlen, der Himmel ist deshalb etwas leerer als der echte. Die Sterne haben keine
+  Eigenbewegung. Im 3D-Modus sind alle Längen Lichtjahre.
 - **Vergleichswürfel:** liegt in der Entfernung `r/D` des Emissionsereignisses in
   `S'`, damit er gleich groß wie das Bild des Terrell-Würfels erscheint.
 
@@ -295,7 +318,8 @@ src/
   physics.js        alle Formeln als reine Funktionen, ausführlich kommentiert
   blackbody.js      Planck → CIE → sRGB, Nachschlagetabelle
   cie1931.js        CIE-1931-Normspektralwertfunktionen (Daten)
-  stars.js          Sternenfeld (fester Zufallsstartwert)
+  stars.js          Sternenfeld der Himmelskugel (fester Zufallsstartwert)
+  stars3d.js        3D-Sternfeld in Zellen, Leuchtkraftmodell
   bodies.js         Würfel und Kugel für Terrell-Penrose
   render.js         three.js-Szene, Shader
   ui.js             Bedienelemente, Reiter, Debug-Panel, Graphen der Simulation
@@ -306,6 +330,7 @@ src/
 tests/
   physics.test.js   Vitest
   blackbody.test.js Vitest
+  stars3d.test.js   Vitest
 assets/
   cockpit.png       liefert der Auftraggeber (nicht im Repository)
 ```
@@ -325,6 +350,9 @@ Literaturverzeichnis der Arbeit (bitte damit abgleichen).
 - Weiskopf, D.; Kraus, U.; Ruder, H. (1999): Searchlight and Doppler Effects in
   the Visualization of Special Relativity: A Corrected Derivation of the
   Transformation of Radiance. ACM Transactions on Graphics 18(3), S. 278 ff.
+- Pecaut, M. J.; Mamajek, E. E. (2013): Intrinsic Colors, Temperatures, and
+  Bolometric Corrections of Pre-main-sequence Stars. The Astrophysical Journal
+  Supplement Series 208, Artikel 9 (Hauptreihentabelle, absolute Helligkeiten).
 - LeDrew, G. (2001): The Real Starry Sky. Journal of the Royal Astronomical
   Society of Canada 95, S. 32 ff. (Häufigkeit der Spektralklassen).
 - CIE-1931-Normspektralwertfunktionen: Datensatz „CIE 1931 2 Degree Standard

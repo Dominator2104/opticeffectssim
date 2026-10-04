@@ -70,7 +70,7 @@ const SPECTRAL_CLASSES = [
 const FRACTION_SUM = SPECTRAL_CLASSES.reduce((s, c) => s + c.fraction, 0);
 
 /** Temperatur zufällig nach den Klassenhäufigkeiten, innerhalb der Klasse gleichverteilt. */
-function randomTemperature(rnd) {
+export function randomTemperature(rnd) {
   let u = rnd() * FRACTION_SUM;
   for (const c of SPECTRAL_CLASSES) {
     if (u < c.fraction) return c.tMin + (c.tMax - c.tMin) * rnd();

@@ -633,6 +633,53 @@ export function properTimeNumeric(betaOfT, t, n = 400) {
 }
 
 /* ------------------------------------------------------------------------- */
+/* 7. Flug durch das 3D-Sternfeld                                            */
+/* ------------------------------------------------------------------------- */
+
+/** Lichtjahre pro Parsec (1 pc = 3,26156 Lj). */
+export const LY_PER_PC = 3.26156;
+
+/** Sekunden pro (julianischem) Jahr; in Lichtjahren und Jahren ist c = 1 Lj/a. */
+export const SECONDS_PER_YEAR = 31557600;
+
+/**
+ * Zeitdilatation: Vergeht an Bord die Eigenzeit dτ, so vergeht in S
+ *
+ *   dt = γ · dτ
+ *
+ * (Die Zeitsteuerung im 3D-Modus bezieht sich auf die Bordzeit τ.)
+ */
+export function coordinateTimeStep(beta, dTau) {
+  return lorentzGamma(beta) * dTau;
+}
+
+/**
+ * In der Zeit dt (in S) legt das Schiff in S die Strecke
+ *
+ *   ds = β · c · dt
+ *
+ * zurück. Mit Lichtjahren und Jahren ist c = 1, also ds [Lj] = β · dt [a].
+ */
+export function distanceStepLy(beta, dtYears) {
+  return beta * dtYears;
+}
+
+/**
+ * Bestrahlungsstärke eines Sterns der absoluten Helligkeit M in der
+ * Entfernung r, relativ zu einem Stern von 0 mag. Mit dem Entfernungsmodul
+ *
+ *   m = M + 5 · log10(r / 10 pc)
+ *
+ * folgt F = 10^(−0,4·m) = 10^(−0,4·M) · (10 pc / r)²  (1/r²-Gesetz).
+ * Die Entfernung r ist die in S von der aktuellen Beobachterposition aus;
+ * die Sterne ruhen in S.
+ */
+export function fluxFromAbsoluteMagnitude(M, rLy) {
+  const tenPc = 10 * LY_PER_PC;
+  return Math.pow(10, -0.4 * M) * (tenPc / rLy) ** 2;
+}
+
+/* ------------------------------------------------------------------------- */
 /* Hilfsfunktionen                                                           */
 /* ------------------------------------------------------------------------- */
 
