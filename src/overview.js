@@ -309,6 +309,7 @@ export function createOverview() {
     drawGammaChart(charts.gamma, state);
 
     charts.doppler.draw({
+      key: beta,
       xMin: 0, xMax: 1, yMin: 0.01, yMax: 100, logY: true,
       xTicks: BETA_TICKS, yTicks: decadeTicks(0.01, 100), xFormat: betaFmt,
       yFormat: (y) => num(y, 1),
@@ -332,6 +333,7 @@ export function createOverview() {
     });
 
     charts.angle.draw({
+      key: beta,
       xMin: 0, xMax: 1, yMin: 0, yMax: 90,
       xTicks: BETA_TICKS, yTicks: [0, 30, 60, 90], xFormat: betaFmt, yFormat: (y) => `${y}°`,
       series: angleSeries,
@@ -343,6 +345,7 @@ export function createOverview() {
     });
 
     charts.beaming.draw({
+      key: beta,
       xMin: 0, xMax: 1, yMin: 1, yMax: 1e7, logY: true,
       xTicks: BETA_TICKS, yTicks: decadeTicks(1, 1e7), xFormat: betaFmt,
       yFormat: (y) => (y < 1e4 ? String(y) : `10${['⁴', '⁵', '⁶', '⁷'][Math.round(Math.log10(y)) - 4]}`),
@@ -366,6 +369,7 @@ export function createOverview() {
     const sc = starSeries(stars);
     const n = stars.count;
     charts.stars.draw({
+      key: `${beta}|${stars.count}|${sc.stride}`,
       xMin: 0, xMax: 1, yMin: 0, yMax: n,
       xTicks: BETA_TICKS, yTicks: [0, n / 4, n / 2, (3 * n) / 4, n], xFormat: betaFmt,
       yFormat: (y) => Math.round(y).toLocaleString('de-DE'),

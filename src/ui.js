@@ -340,6 +340,7 @@ export function createUI(state, cb) {
   $('star-count').addEventListener('change', (e) => cb.onStarCount(Number(e.target.value)));
 
   setupLookAround($('canvas'), state);
+  setupPresentation(state, cb);
   setBeta(state.beta);
   refreshAccel(null);
 
@@ -360,6 +361,11 @@ export function createUI(state, cb) {
     },
     setFlightInfo(rows) {
       fillTable($('flight-info'), rows);
+    },
+    setPresentPlaying(playing) {
+      const b = $('pres-play');
+      const t = playing ? '⏸' : '▶';
+      if (b.textContent !== t) b.textContent = t;
     },
   };
 }
@@ -406,6 +412,66 @@ function bindRange(id, outId, apply, digits) {
   };
   el.addEventListener('input', update);
   update();
+}
+
+/**
+ * Präsentationsmodus: Vollbild, sichtbar bleiben nur Play/Anhalten, der
+ * 3D-Schalter und der β-Regler. Die Leiste blendet sich aus, wenn die Maus
+ * 3 s ruht. Beenden mit ✕ oder Esc (Esc verlässt auch das Vollbild).
+ */
+function setupPresentation(state, cb) {
+  const body = document.body;
+  const bar = $('present-bar');
+  const pres3d = $('pres-3d');
+  const mode3d = $('mode3d');
+  let idleTimer = 0;
+
+  const poke = () => {
+    body.classList.remove('idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => body.classList.add('idle'), 3000);
+  };
+
+  function enter() {
+    if (state.presenting) return;
+    state.presenting = true;
+    // immer die Simulation zeigen
+    document.querySelector('#tabs button[data-tab=sim]').click();
+    body.classList.add('presenting');
+    bar.hidden = false;
+    pres3d.checked = mode3d.checked;
+    poke();
+    document.documentElement.requestFullscreen?.().catch(() => {});
+  }
+  function exit() {
+    if (!state.presenting) return;
+    state.presenting = false;
+    body.classList.remove('presenting', 'idle');
+    bar.hidden = true;
+    clearTimeout(idleTimer);
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  }
+
+  $('present-btn').addEventListener('click', enter);
+  $('pres-exit').addEventListener('click', exit);
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement) exit();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (!state.presenting) return;
+    if (e.key === 'Escape') exit();
+    if (e.key === ' ' && e.target.tagName !== 'INPUT') {
+      e.preventDefault();
+      cb.onPresentPlay();
+    }
+  });
+  document.addEventListener('pointermove', () => state.presenting && poke());
+  pres3d.addEventListener('change', () => {
+    mode3d.checked = pres3d.checked;
+    mode3d.dispatchEvent(new Event('change'));
+  });
+  mode3d.addEventListener('change', () => (pres3d.checked = mode3d.checked));
+  $('pres-play').addEventListener('click', () => cb.onPresentPlay());
 }
 
 /** Umschauen durch Ziehen mit der Maus (bzw. Finger); Doppelklick = nach vorn. */
@@ -475,6 +541,7 @@ const commaFixed = (x, d) => x.toFixed(d).replace('.', ',');
 export function drawGammaChart(chart, state) {
   const gammaMax = lorentzGamma(BETA_MAX);
   chart.draw({
+    key: state.beta,
     xMin: 0, xMax: 1, yMin: 0, yMax: Math.ceil(gammaMax / 5) * 5,
     xTicks: [0, 0.2, 0.4, 0.6, 0.8, 1], yTicks: [0, 5, 10, 15, 20, 25],
     xFormat: (x) => (x === 0 ? '0' : commaFixed(x, 1)),
@@ -497,6 +564,7 @@ export function drawBetaTimeChart(chart, state) {
   const betaAt = (t) => Math.min(BETA_MAX, accelBetaAt(acc, t));
   const pts = Array.from({ length: 201 }, (_, i) => [((i / 200) * T) / u, betaAt((i / 200) * T)]);
   chart.draw({
+    key: `${state.beta}|${acc.t}|${T}|${acc.curve}|${acc.beta0}|${acc.beta1}|${u}`,
     xMin: 0, xMax: T / u, yMin: 0, yMax: 1,
     xTicks: [0, T / u / 2, T / u], yTicks: [0, 0.25, 0.5, 0.75, 1],
     xFormat: (x) => (x === 0 ? '0' : `${formatNumber(x, 3)} ${acc.unitName}`),

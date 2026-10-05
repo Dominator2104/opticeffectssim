@@ -31,7 +31,10 @@ import {
 } from './physics.js';
 import { generateCell, neededCells, REAL_DENSITY_PER_LY3 } from './stars3d.js';
 import { bodyCenter } from './bodies.js';
-import { visibleLuminance, visibleFraction } from './blackbody.js';
+import { visibleFraction, createVisibleLuminanceLookup } from './blackbody.js';
+
+/** Schnelle Y(T)-Tabelle für das Debug-Panel (statt jedes Mal neu zu integrieren). */
+const visibleLuminance = createVisibleLuminanceLookup();
 import { generateStars } from './stars.js';
 import { createRenderer, WINDOW_HALF_ANGLE_DEG } from './render.js';
 import { createCockpitOverlay, composeSnapshot } from './overlay.js';
@@ -120,7 +123,7 @@ const ui = createUI(state, {
     const projection = state.projection === 'stereographic' ? 'stereografisch' : 'Perspektive';
     const caption = withCaption
       ? `β = ${formatNumber(state.beta, 4)} · γ = ${formatNumber(state.gamma, 4)} · ${projection} · ` +
-        `Sichtfeld ${formatNumber(state.fovDeg, 3)}° · Simulation erstellt mit Claude Code (KI)`
+        `Sichtfeld ${formatNumber(state.fovDeg, 3)}°`
       : null;
     const { blob, withoutCockpit } = await composeSnapshot(canvas, overlay, caption);
     const name = `simulation_beta${state.beta.toFixed(4)}_${state.projection}.png`;
@@ -137,6 +140,7 @@ const ui = createUI(state, {
     state.starCount = n;
     stars = generateStars(n);
     view.setStars(stars);
+    sceneVersion++;
   },
   onLookAt(which) {
     lookAtBody(which);
@@ -167,6 +171,19 @@ const ui = createUI(state, {
     if (state.flight.enabled) state.flight.running = true; // im 3D-Modus läuft sie mit der Flug-Uhr
     ui.setBeta(accelBetaAt(acc, acc.t));
   },
+  onPresentPlay() {
+    // 3D-Modus: Flug abspielen/anhalten; sonst die Beschleunigungsphase
+    const f = state.flight;
+    const acc = state.accel;
+    if (f.enabled) {
+      f.running = !f.running;
+      if (!f.running) acc.running = false;
+    } else if (acc.running) {
+      acc.running = false;
+    } else {
+      this.onAccelStart();
+    }
+  },
   onMode3d(enabled) {
     if (enabled && !state.flight.anchors) placeBodies3d();
     if (!enabled) {
@@ -185,12 +202,14 @@ const ui = createUI(state, {
   },
   onField3dChange() {
     view.field3d.clear(); // Zellen mit neuer Größe bzw. Dichte erzeugen
+    sceneVersion++;
   },
   onPlaceBodies3d() {
     placeBodies3d();
   },
   onTab(tab) {
     if (tab === 'sim') view.resize();
+    sceneVersion++;
   },
 });
 const simCharts = createSimCharts();
@@ -303,6 +322,12 @@ function updateTerrellInfo(L) {
 // Bildrate: gleitender Mittelwert über die letzten Bilder
 let lastTime = performance.now();
 let fps = 60;
+// Neu zeichnen nur bei Änderungen: Signatur des letzten gezeichneten Zustands
+let lastSignature = '';
+let sceneVersion = 0; // erhöhen, wenn sich Daten ändern, die nicht im Zustand stehen
+let renderCount = 0;
+let renderFps = 0;
+let lastUiUpdate = 0;
 
 function frame(now) {
   const dt = Math.max(1e-3, (now - lastTime) / 1000);
@@ -342,14 +367,30 @@ function frame(now) {
   }
 
   if (state.tab === 'sim') {
-    view.render(renderState());
-    updateDebug(debugRows());
-    if (state.flight.enabled) updateFlightInfo();
+    // Nur neu zeichnen, wenn sich etwas geändert hat (spart Grafikkarte und Akku)
+    const rs = renderState();
+    const sig = `${JSON.stringify(rs)}|${canvas.clientWidth}x${canvas.clientHeight}|${window.devicePixelRatio}|${sceneVersion}`;
+    if (sig !== lastSignature) {
+      view.render(rs);
+      lastSignature = sig;
+      renderCount++;
+    }
     simCharts.update(state);
   } else {
     overviewView.update(state, stars);
   }
-  updateAccelInfo();
+  // Textanzeigen 10-mal pro Sekunde genügen
+  if (now - lastUiUpdate > 100) {
+    renderFps = (renderCount * 1000) / (now - lastUiUpdate);
+    renderCount = 0;
+    lastUiUpdate = now;
+    if (state.tab === 'sim') {
+      updateDebug(debugRows());
+      if (state.flight.enabled) updateFlightInfo();
+    }
+    updateAccelInfo();
+  }
+  if (state.presenting) ui.setPresentPlaying(state.flight.enabled ? state.flight.running : state.accel.running);
 
   requestAnimationFrame(frame);
 }
@@ -389,7 +430,8 @@ function advanceFlight(dtReal) {
   // benötigte Zellen um das Schiff laden, entfernte freigeben
   const L = f.cellSize;
   const density = REAL_DENSITY_PER_LY3 * f.density;
-  view.field3d.update(f.observer, neededCells(f.observer, L, 1), (i, j, k) => generateCell(i, j, k, L, density), L);
+  const created = view.field3d.update(f.observer, neededCells(f.observer, L, 1), (i, j, k) => generateCell(i, j, k, L, density), L);
+  if (created > 0) sceneVersion++;
 }
 
 let flightStats = { count: 0, nearest: Infinity };
@@ -423,6 +465,7 @@ function renderState() {
     beaming: state.beaming,
     spectrum: state.spectrum,
     mode3d: state.flight.enabled,
+    observer3d: state.flight.enabled ? state.flight.observer : null, // nur für die Änderungserkennung
     windowMarker: state.windowMarker,
     projection: state.projection,
     fovDeg: state.fovDeg,
@@ -520,7 +563,8 @@ function debugRows() {
       : '–'],
     ['Modus', state.flight.enabled ? '3D-Flug' : 'Himmelskugel'],
     ['Sterne', state.flight.enabled ? `${flightStats.count.toLocaleString('de-DE')} (3D)` : state.starCount.toLocaleString('de-DE')],
-    ['Bildrate', `${fps.toFixed(0)} Bilder/s`],
+    ['Bildrate (gezeichnet)', `${renderFps.toFixed(0)} Bilder/s`],
+    ['  Schleife', `${fps.toFixed(0)} Durchläufe/s`],
   ];
 }
 requestAnimationFrame(frame);

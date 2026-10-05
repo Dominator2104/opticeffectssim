@@ -123,6 +123,12 @@ float visibleSpectralFactor(float T, float Tprime) {
   return pow(10.0, logRatio);
 }
 
+// physics.bolometricToVisibleRatio(T): k(T) = (T/5800 K)⁴ · Y(5800 K)/Y(T)
+// (Tabelle speichert log10 Y relativ zu Y(5800 K), also k = 10^(4·log10(T/5800) − A))
+float bolometricToVisibleRatio(float T) {
+  return pow(10.0, 4.0 * log(T / 5800.0) * INV_LN10 - blackbodyLookup(T).a);
+}
+
 // physics.wienPeakWavelengthNm(T): λ_max = b/T, b = 2,897771955·10⁻³ m·K
 float wienPeakWavelengthNm(float T) {
   return 2.897771955e6 / T;
@@ -210,11 +216,13 @@ void starAppearance(vec3 n, float baseFlux, float T) {
   vColor = uFullSpectrum ? falseColorLookup(Tseen) : blackbodyLookup(Tseen).rgb;
 
   // Helligkeit: Sterne sind Punkte → D^(−2), nicht D^(−4)!
+  // baseFlux ist eine visuelle Helligkeit.
   // Nur sichtbar: zusätzlich der Anteil im Sichtbaren (zusammen D²·Y(T')/Y(T)).
-  // Gesamtes Spektrum: bolometrisch, also nur D^(−2).
+  // Gesamtes Spektrum: auf bolometrisch umrechnen (k(T)), dann nur D^(−2).
   float flux = baseFlux;
   if (uBeaming) flux *= beamingPointSource(D);
-  if (!uFullSpectrum) flux *= visibleSpectralFactor(T, Tseen);
+  if (uFullSpectrum) flux *= bolometricToVisibleRatio(T);
+  else flux *= visibleSpectralFactor(T, Tseen);
 
   // Darstellung eines Punktes (keine Physik): Die Bildschirmhelligkeit ist
   // "Fläche × Leuchtdichte" des Lichtflecks. Bis Intensität 1 wird nur die
@@ -396,7 +404,13 @@ function createStarField3D(sharedUniforms) {
      */
     update(observer, needed, generate, sizeLy, maxNew = 9) {
       const keep = new Set(needed.map((c) => c.join(',')));
-      for (const key of [...cells.keys()]) if (!keep.has(key)) dispose(key);
+      let removed = 0;
+      for (const key of [...cells.keys()]) {
+        if (!keep.has(key)) {
+          dispose(key);
+          removed++;
+        }
+      }
       let created = 0;
       for (const [i, j, k] of needed) {
         const key = `${i},${j},${k}`;
@@ -411,6 +425,7 @@ function createStarField3D(sharedUniforms) {
           c.origin[2] - observer[2],
         );
       }
+      return created + removed; // Anzahl geänderter Zellen (> 0: neu zeichnen)
     },
     clear() {
       for (const key of [...cells.keys()]) dispose(key);
@@ -506,7 +521,8 @@ void main() {
   // Helligkeit: ausgedehnte Fläche → D^(−4), nicht D^(−2)!
   float L = uRadiance * pattern;
   if (uBeaming) L *= beamingExtended(D);
-  if (!uFullSpectrum) L *= visibleSpectralFactor(T, Tseen); // nur sichtbar: Y(T')/Y(T)
+  if (uFullSpectrum) L *= bolometricToVisibleRatio(T);      // gesamtes Spektrum: bolometrisch
+  else L *= visibleSpectralFactor(T, Tseen);                // nur sichtbar: Y(T')/Y(T)
 
   // gleiche Strahldichte → gleiche Helligkeit, unabhängig vom Farbton
   float colorLuminance = max(dot(color, vec3(0.2126, 0.7152, 0.0722)), 1.0e-3);
