@@ -27,21 +27,30 @@ export const CHART = {
 export function createLineChart(canvas, tip) {
   let hoverX = null;
   let geom = null;
+  // Neu zeichnen nur, wenn sich Schlüssel (opts.key), Maus oder Größe ändern
+  let lastKey;
+  let lastSize = '';
+  let hoverDirty = true;
 
   canvas.addEventListener('pointermove', (e) => {
     if (!geom) return;
     const rect = canvas.getBoundingClientRect();
     const frac = (e.clientX - rect.left - geom.pad.l) / (geom.w - geom.pad.l - geom.pad.r);
     hoverX = frac < 0 || frac > 1 ? null : geom.xMin + frac * (geom.xMax - geom.xMin);
+    hoverDirty = true;
   });
-  canvas.addEventListener('pointerleave', () => (hoverX = null));
+  canvas.addEventListener('pointerleave', () => {
+    hoverX = null;
+    hoverDirty = true;
+  });
 
   /**
    * opts: {
    *   xMin, xMax, yMin, yMax, logY?, xTicks, yTicks, xFormat(x), yFormat(y),
    *   series: [{ points: [[x, y], …], color, label }],
    *   markers?: [{ x, y, color }],
-   *   hover?: (x) => ({ title, rows: [{ label, y, color, text }] })
+   *   hover?: (x) => ({ title, rows: [{ label, y, color, text }] }),
+   *   key?: Wert, der sich ändert, wenn neu gezeichnet werden muss (z. B. β)
    * }
    */
   function draw(opts) {
@@ -49,6 +58,11 @@ export function createLineChart(canvas, tip) {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
     if (w === 0 || h === 0) return;
+    const size = `${w}x${h}x${dpr}`;
+    if (opts.key !== undefined && opts.key === lastKey && !hoverDirty && size === lastSize) return;
+    lastKey = opts.key;
+    lastSize = size;
+    hoverDirty = false;
     if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
       canvas.width = Math.round(w * dpr);
       canvas.height = Math.round(h * dpr);

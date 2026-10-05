@@ -326,6 +326,27 @@ export function visibleSpectralFactor(T, Tprime, Yrest, Yshifted) {
   return (Yshifted / Yrest) * r * r * r * r;
 }
 
+/**
+ * Umrechnung visuelle → bolometrische Helligkeit eines Schwarzkörpers,
+ * bezogen auf einen sonnenähnlichen Stern (T_ref = 5 800 K):
+ *
+ *   F_bol / F_vis = k(T) = (T / T_ref)⁴ · Y(T_ref) / Y(T)
+ *
+ * (σT⁴/π ist die gesamte, Y(T) die sichtbare Strahldichte; k(T_ref) = 1.)
+ * Die Grundhelligkeiten der Sterne sind visuelle Helligkeiten. Im Modus
+ * "gesamtes Spektrum" wird mit k(T) auf die Helligkeit über alle
+ * Wellenlängen umgerechnet: Kühle M-Sterne (vor allem IR) und sehr heiße
+ * Sterne (vor allem UV) werden dadurch heller als im Sichtbaren.
+ * Entspricht der bolometrischen Korrektur BC = −2,5·log10 k(T) eines
+ * Schwarzkörpers relativ zur Sonne.
+ *
+ * @param {number} T
+ * @param {(T:number)=>number} Y  sichtbare Helligkeit Y(T) (blackbody.js)
+ */
+export function bolometricToVisibleRatio(T, Y, Tref = 5800) {
+  return (T / Tref) ** 4 * (Y(Tref) / Y(T));
+}
+
 /** Wiensche Verschiebungskonstante b in m·K (CODATA 2018). */
 export const WIEN_B = 2.897771955e-3;
 

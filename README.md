@@ -13,10 +13,9 @@ W-Seminar Physik, CSG Ingolstadt, 24.09.2026.**
 
 Der gesamte Quelltext wurde von der KI geschrieben, nach einem Auftrag, der
 die Konventionen und Formeln aus Kapitel 3 der Seminararbeit verbindlich
-vorgibt. Jede Quelltextdatei beginnt mit diesem Hinweis, und im Programm steht
-unten: „Simulation erstellt mit Claude Code (KI). Physikalische Grundlagen
-siehe Kapitel 3 der Seminararbeit.“ Gespeicherte Standbilder tragen auf Wunsch
-ebenfalls den Hinweis.
+vorgibt. Jede Quelltextdatei beginnt mit diesem Hinweis. In der Oberfläche des
+Programms selbst steht kein Hinweis; die Kennzeichnung als KI-Arbeit erfolgt
+durch den Auftraggeber in der Seminararbeit und bei jeder Verwendung.
 
 ## Starten
 
@@ -128,6 +127,7 @@ welche Funktion aus `physics.js` sie übersetzt.
 | 3D-Flug: Zeitdilatation | `dt = γ·dτ` (Zeitsteuerung in Bordzeit τ) | `coordinateTimeStep` | Zeitdilatation |
 | 3D-Flug: Strecke in S | `ds = β·c·dt`, in Lj und Jahren `ds = β·dt` | `distanceStepLy` | — |
 | 3D-Flug: Helligkeit nach Entfernung | `F = 10^(−0,4·M)·(10 pc / r)²` (Entfernungsmodul, 1/r²) | `fluxFromAbsoluteMagnitude` | Entfernungsmodul `m = M + 5·log10(r/10 pc)` |
+| Visuell → bolometrisch | `k(T) = (T/5800 K)⁴ · Y(5800 K)/Y(T)`; im Modus „gesamtes Spektrum“ wird die (visuelle) Grundhelligkeit damit umgerechnet | `bolometricToVisibleRatio` | bolometrische Korrektur eines Schwarzkörpers relativ zur Sonne |
 | Anteil im Sichtbaren | `f(T) = ∫₃₈₀⁷⁸⁰ B_λ dλ / (σT⁴/π)` | `visibleFraction` (blackbody.js) | Stefan-Boltzmann; Kennzeichnung „nur UV/IR“ bei `f < 1 %` |
 
 Farbe (`src/blackbody.js`): Planck-Spektrum `B_λ(λ, T)` wird über 380–780 nm
@@ -155,7 +155,7 @@ Spektrum des Sterns als vollständiges Planck-Spektrum annimmt.
 ## Tests
 
 `npm test` führt `tests/physics.test.js` und `tests/blackbody.test.js` aus
-(50 Tests). Sollwerte bei β = 0,9:
+(54 Tests). Sollwerte bei β = 0,9:
 
 | Größe | Sollwert |
 |---|---|
@@ -175,6 +175,12 @@ Form; Beschleunigung zwischen β₀ und β₁ (Dauer ↔ a, Bremsen, `u = βγ` 
 Terrell-Drehwinkel `arcsin β` und Verkürzung `1/γ` bei `ψ' = 90°`; Sichtbarkeitsanteil
 und Falschfarben; Zählung der mit bloßem Auge sichtbaren Sterne; 3D-Modus (`tests/stars3d.test.js`):
 `dt = γ·dτ`, Strecke, Entfernungsmodul, Reproduzierbarkeit und Anzahl der Sterne je Zelle.
+
+**Unabhängige Gegenprüfung** (ohne die Formeln aus `physics.js`): Aberration und
+`D` werden für 600 zufällige Richtungen direkt per Lorentz-Transformation des
+Photonen-Viererimpulses nachgerechnet (Übereinstimmung auf 9 Stellen); die
+Beschleunigungskurve durch numerisches Integrieren von `dβ/dt = (a/c)(1 − β²)^{3/2}`
+(Übereinstimmung auf 6 Stellen).
 
 Zusätzlich im Browser geprüft (während der Entwicklung, nicht Teil von `npm test`):
 
@@ -231,7 +237,11 @@ Beschleunigungsphase sind in beiden vorhanden und immer synchron.
 - **Ansicht:** Projektion (Perspektive / stereografisch), Sichtfeld (Vorgabe 60°),
   Belichtung, Sternzahl der Himmelskugel (10 000 bis 1 000 000). Umschauen durch Ziehen mit der
   Maus, Doppelklick schaut wieder nach vorn.
-- **Standbild speichern** als PNG, wahlweise mit Werten und KI-Hinweis im Bild.
+- **Standbild speichern** als PNG, wahlweise mit den Werten (β, γ, Projektion, Sichtfeld) im Bild.
+- **Präsentationsmodus** (Knopf „⛶ Präsentation“ oben rechts): Vollbild, sichtbar
+  bleiben nur Play/Anhalten, der 3D-Schalter und der Geschwindigkeitsregler. Play
+  steuert im 3D-Modus den Flug, sonst die Beschleunigungsphase; Leertaste wirkt
+  wie Play. Die Leiste blendet sich aus, wenn die Maus 3 s ruht. Beenden mit ✕ oder Esc.
 - **Graphen:** γ über β mit Marker; während der Beschleunigungsphase β über t.
 - **Debug-Panel:** alle Werte, die sich mit β ändern, mit Einheit.
 
@@ -283,6 +293,10 @@ Damit klar ist, was aus einer Formel folgt und was nur Darstellung ist:
 - **Außerhalb der Farbtabelle:** Farbe vom Tabellenrand (für T → ∞ konvergiert
   die Farbe ohnehin); die sichtbare Helligkeit wird oberhalb von 10⁶ K nach
   Rayleigh-Jeans (Y ∝ T) fortgesetzt, unterhalb von 500 K ist sie praktisch null.
+- **Leistung:** Das Bild wird nur neu gezeichnet, wenn sich etwas ändert (Regler,
+  Blickrichtung, Flug, Fenstergröße …); in Ruhe arbeitet die Grafikkarte nicht.
+  Diagramme werden nur bei neuem β oder Mausbewegung neu gezeichnet, Textanzeigen
+  zehnmal pro Sekunde aktualisiert.
 - **β-Obergrenze:** Regler und Beschleunigungskurven sind auf β ≤ 0,999 begrenzt.
 - **Falschfarben:** Bereich 50 nm – 20 µm und logarithmische Stauchung sind eine
   Wahl der Darstellung (Kompromiss zwischen Unterscheidbarkeit in Ruhe und

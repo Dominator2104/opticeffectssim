@@ -17,6 +17,7 @@
         <button type="button" role="tab" data-tab="sim" aria-selected="true">Simulation</button>
         <button type="button" role="tab" data-tab="overview" aria-selected="false">Übersicht</button>
       </nav>
+      <button type="button" id="present-btn" title="Präsentationsmodus: Vollbild, nur Play, 3D und Geschwindigkeit">⛶ Präsentation</button>
     </header>
 
     <!-- ===================== Simulation ===================== -->
@@ -25,6 +26,12 @@
         <canvas id="canvas"></canvas>
         <img id="cockpit" alt="" hidden />
         <div id="hint">Ziehen mit der Maus: umschauen · Doppelklick: Blick nach vorn</div>
+        <div id="present-bar" hidden>
+          <button type="button" id="pres-play" title="Abspielen / Anhalten (Leertaste)">▶</button>
+          <label class="pres-3d"><input type="checkbox" id="pres-3d" /> 3D</label>
+          <div class="beta-control pres" data-instance="pres"></div>
+          <button type="button" id="pres-exit" title="Präsentation beenden (Esc)">✕</button>
+        </div>
       </main>
 
       <aside id="panel">
@@ -192,7 +199,7 @@
 
         <section>
           <h2>Standbild</h2>
-          <label class="check"><input id="export-caption" type="checkbox" checked /> Werte und KI-Hinweis ins Bild schreiben</label>
+          <label class="check"><input id="export-caption" type="checkbox" checked /> Werte ins Bild schreiben</label>
           <div class="row buttons">
             <button id="export-png" type="button">Standbild speichern (PNG)</button>
           </div>
@@ -287,7 +294,7 @@
     </div>
 
     <footer id="footer">
-      Simulation erstellt mit Claude Code (KI). Physikalische Grundlagen siehe Kapitel 3 der Seminararbeit.
+      Physikalische Grundlagen siehe Kapitel 3 der Seminararbeit.
     </footer>
     <script type="module" src="./src/main.js"></script>
   </body>

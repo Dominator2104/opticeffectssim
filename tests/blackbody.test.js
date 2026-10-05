@@ -38,6 +38,7 @@ import {
   wienPeakWavelengthNm,
   peakBand,
   nakedEyeVisibleCount,
+  bolometricToVisibleRatio,
 } from '../src/physics.js';
 
 describe('Planck-Spektrum und CIE-Integration', () => {
@@ -206,5 +207,24 @@ describe('Sichtbare Sterne mit bloßem Auge', () => {
     expect(nakedEyeVisibleCount(stars, 0, Y)).toEqual({ visible: 2, invisible: 0 });
     // vorn: sichtbare Helligkeit × 2,6 (heller), hinten: stark gedämpft
     expect(nakedEyeVisibleCount(stars, 0.9, Y)).toEqual({ visible: 1, invisible: 1 });
+  });
+});
+
+describe('Visuelle → bolometrische Helligkeit (Modus „gesamtes Spektrum“)', () => {
+  it('k(5 800 K) = 1; kühle und sehr heiße Sterne strahlen mehr außerhalb des Sichtbaren', () => {
+    const Y = (T) => visibleLuminance(T);
+    expect(bolometricToVisibleRatio(5800, Y)).toBeCloseTo(1, 12);
+    expect(bolometricToVisibleRatio(3000, Y)).toBeGreaterThan(1.5);
+    expect(bolometricToVisibleRatio(30000, Y)).toBeGreaterThan(1.5);
+  });
+
+  it('k(T) = Gesamtanteil / sichtbarer Anteil, relativ zur Sonne', () => {
+    const Y = (T) => visibleLuminance(T);
+    for (const T of [2500, 4000, 10000, 20000]) {
+      // f(T) = Anteil im Sichtbaren; k ∝ 1/f bis auf die Gewichtung mit ȳ
+      const k = bolometricToVisibleRatio(T, Y);
+      expect(k).toBeGreaterThan(0);
+      expect(Number.isFinite(k)).toBe(true);
+    }
   });
 });

@@ -167,3 +167,25 @@ table.data td.act button { padding: 0 6px; }
   .ov-controls { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
   .ov-grid { grid-template-columns: 1fr; overflow: visible; }
 }
+
+/* ---------- Präsentationsmodus ---------- */
+#present-btn { margin-left: auto; }
+body.presenting #topbar,
+body.presenting #panel,
+body.presenting #footer,
+body.presenting #hint { display: none; }
+#present-bar {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 14px;
+  padding: 8px 14px; border-radius: 10px;
+  background: rgba(14, 17, 24, 0.72); border: 1px solid var(--border);
+  backdrop-filter: blur(4px); transition: opacity 0.4s;
+}
+#present-bar[hidden] { display: none; }
+#present-bar button { font-size: 15px; padding: 4px 12px; }
+#present-bar .pres-3d { font-size: 14px; display: flex; align-items: center; gap: 4px; }
+#present-bar .beta-control { display: flex; align-items: center; gap: 8px; width: min(46vw, 520px); }
+#present-bar .beta-control > label, #present-bar .beta-control .note { display: none; }
+#present-bar .beta-control .row { flex: 1; margin: 0; }
+body.presenting.idle #present-bar { opacity: 0; }
+body.presenting.idle #canvas { cursor: none; }

@@ -377,3 +377,48 @@ describe('Weitere Selbsttests', () => {
     expect(() => lorentzGamma(1.2)).toThrow(RangeError);
   });
 });
+
+/* ------------------------------------------------------------------------- */
+describe('Unabhängige Gegenprüfung (ohne die Formeln aus physics.js)', () => {
+  it('Aberration und D stimmen mit der Lorentz-Transformation des Photonen-Viererimpulses überein', () => {
+    // Photon kommt aus Richtung n (Blick zum Stern), Impuls k = −n, Energie E = 1.
+    // Beobachter bewegt sich mit β in +z:  E' = γ(E − β k_z),  k'_z = γ(k_z − β E),  k'_⊥ = k_⊥
+    const rnd = mulberry32(99);
+    for (const beta of [0.3, 0.9, 0.999]) {
+      const g = 1 / Math.sqrt(1 - beta * beta);
+      for (let i = 0; i < 200; i++) {
+        const cz = 2 * rnd() - 1;
+        const s = Math.sqrt(1 - cz * cz);
+        const phi = 2 * Math.PI * rnd();
+        const n = [s * Math.cos(phi), s * Math.sin(phi), cz];
+        const k = n.map((v) => -v);
+        const E2 = g * (1 - beta * k[2]);
+        const k2 = [k[0], k[1], g * (k[2] - beta)];
+        const nSeen = k2.map((v) => -v / E2); // Blickrichtung in S'
+        const got = aberrateDirection(beta, n);
+        for (let c = 0; c < 3; c++) expect(got[c]).toBeCloseTo(nSeen[c], 9);
+        // λ'/λ = E/E'
+        expect(dopplerFactor(beta, cz) * E2).toBeCloseTo(1, 9);
+      }
+    }
+  });
+
+  it('konstante Eigenbeschleunigung: dβ/dt = (a/c)(1 − β²)^{3/2} numerisch integriert', () => {
+    const a = 9.81;
+    const b0 = 0.2;
+    const b1 = 0.95;
+    const T = accelerationDuration(a, b0, b1);
+    let beta = b0;
+    const n = 200000;
+    const dt = T / n;
+    for (let i = 0; i < n; i++) {
+      // Runge-Kutta 2. Ordnung
+      const f = (b) => (a / C) * Math.pow(1 - b * b, 1.5);
+      const k1 = f(beta);
+      const k2 = f(beta + 0.5 * dt * k1);
+      beta += dt * k2;
+    }
+    expect(beta).toBeCloseTo(b1, 6);
+    expect(betaConstantBetween(T / 2, T, b0, b1)).toBeGreaterThan(b0);
+  });
+});
