@@ -238,6 +238,16 @@ Beschleunigungsphase sind in beiden vorhanden und immer synchron.
   Belichtung, Sternzahl der Himmelskugel (10 000 bis 1 000 000). Umschauen durch Ziehen mit der
   Maus, Doppelklick schaut wieder nach vorn.
 - **Standbild speichern** als PNG, wahlweise mit den Werten (β, γ, Projektion, Sichtfeld) im Bild.
+- **Showcase-Bild** (Knopf „✨ Showcase-Bild“ unter „Standbild“): ein Poster in
+  3840 × 2160 zum Herzeigen, auch für Laien verständlich. Enthält das Hauptbild,
+  neu berechnet in 2400 × 1500, und bis zu drei markierte Sterne mit ihren
+  berechneten Werten (eigentliche und gesehene Temperatur samt Farbe,
+  Helligkeitsänderung, wahre und gesehene Richtung, im 3D-Modus die Entfernung).
+  Dazu kommen der Kreis, in den die vordere Himmelshälfte zusammengedrängt ist,
+  ein Vergleichsbild „derselbe Blick in Ruhe“, Faktenkarten in Alltagssprache,
+  das Spektrum des Sonnenlichts in Ruhe und von vorn, die γ-Kurve und die
+  Formeln. Die markierten Sterne werden mit denselben Formeln bewertet wie im
+  Shader (`src/showcase.js`).
 - **Präsentationsmodus** (Knopf „⛶ Präsentation“ oben rechts): Vollbild, sichtbar
   bleiben nur Play/Anhalten, der 3D-Schalter und der Geschwindigkeitsregler. Play
   steuert im 3D-Modus den Flug, sonst die Beschleunigungsphase; Leertaste wirkt
@@ -340,6 +350,7 @@ src/
   charts.js         Liniendiagramme auf <canvas>
   overview.js       Reiter „Übersicht“: Diagramme und Tabellen
   overlay.js        Cockpit-Bild, Standbild-Export
+  showcase.js       Showcase-Poster (4K) mit markierten Sternen und Faktenkarten
   style.css
 tests/
   physics.test.js   Vitest

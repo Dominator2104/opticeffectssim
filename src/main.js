@@ -48,6 +48,7 @@ import {
   accelBetaAt,
 } from './ui.js';
 import { createOverview } from './overview.js';
+import { analyzeStars, pickCallouts, composeShowcase, MAIN_W, MAIN_H, REST_W, REST_H } from './showcase.js';
 
 /** Zentraler Zustand der Simulation. UI schreibt hinein, Renderer liest daraus. */
 const state = {
@@ -135,6 +136,31 @@ const ui = createUI(state, {
     return withoutCockpit
       ? `${name} gespeichert – OHNE Cockpit (Bild aus Datei-Pfad darf der Browser nicht mitspeichern; „Bild wählen…“ benutzen).`
       : `${name} gespeichert.`;
+  },
+  async onShowcase() {
+    const rs = renderState();
+    // Hauptbild in hoher Auflösung und Vergleichsbild in Ruhe (gleicher Blick, β = 0)
+    const mainImg = view.renderOffscreen(rs, MAIN_W, MAIN_H);
+    const restImg = view.renderOffscreen({ ...rs, beta: 0, gamma: 1 }, REST_W, REST_H);
+    sceneVersion++; // Bildschirm wieder normal zeichnen
+    const f = state.flight;
+    const source = f.enabled ? { mode3d: true, field3d: view.field3d, observer: f.observer } : { mode3d: false, stars };
+    const callouts = pickCallouts(analyzeStars(rs, source, MAIN_W, MAIN_H), MAIN_W);
+    const starCount = f.enabled ? view.field3d.stats(f.observer).count : state.starCount;
+    const blob = await composeShowcase({
+      mainImg,
+      restImg,
+      rs,
+      callouts,
+      info: { starCount, mode3d: f.enabled, distanceLy: f.distance },
+    });
+    const name = `showcase_beta${state.beta.toFixed(4)}${f.enabled ? '_3d' : ''}.png`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    return `${name} gespeichert (3840 × 2160, ${callouts.length} Sterne markiert).`;
   },
   onStarCount(n) {
     state.starCount = n;

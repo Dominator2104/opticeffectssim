@@ -430,6 +430,10 @@ function createStarField3D(sharedUniforms) {
     clear() {
       for (const key of [...cells.keys()]) dispose(key);
     },
+    /** Alle geladenen Zellen: Ursprung in S (Lj) und Sterndaten (stars3d.generateCell). */
+    forEachCell(fn) {
+      for (const c of cells.values()) fn(c.origin, c.data);
+    },
     /** Anzahl geladener Sterne und Entfernung des nächsten Sterns (Lj). */
     stats(observer) {
       let count = 0;
@@ -904,5 +908,31 @@ export function createRenderer(canvas) {
     return { ratio: Math.sqrt((tr / 2 + disc) / (tr / 2 - disc)), radiusPx: Math.sqrt(n / Math.PI) };
   }
 
-  return { renderer, setStars, resize, render, measureSphereRoundness, field3d };
+  /**
+   * Rendert den Zustand s in einer beliebigen Auflösung (width × height) und
+   * gibt eine Kopie als 2D-Canvas zurück (für das Showcase-Bild).
+   * Punktgrößen werden so skaliert, dass die Sterne im Verhältnis zur
+   * Bildhöhe so groß wirken wie am Bildschirm. Danach wird die normale Größe
+   * wiederhergestellt; der Aufrufer muss neu zeichnen lassen.
+   */
+  function renderOffscreen(s, width, height) {
+    const cssH = Math.max(1, canvas.clientHeight);
+    const savedPr = renderer.getPixelRatio();
+    renderer.setPixelRatio(1);
+    renderer.setSize(width, height, false);
+    target.setSize(width, height);
+    uniforms.uAspect.value = width / height;
+    // mindestens 1, damit Sterne auch in kleinen Bildern nicht unter ein Pixel schrumpfen
+    uniforms.uPixelRatio.value = Math.max(1, height / cssH);
+    render(s);
+    const out = document.createElement('canvas');
+    out.width = width;
+    out.height = height;
+    out.getContext('2d').drawImage(renderer.domElement, 0, 0);
+    renderer.setPixelRatio(savedPr);
+    resize();
+    return out;
+  }
+
+  return { renderer, setStars, resize, render, measureSphereRoundness, renderOffscreen, field3d };
 }
