@@ -238,16 +238,23 @@ Beschleunigungsphase sind in beiden vorhanden und immer synchron.
   Belichtung, Sternzahl der Himmelskugel (10 000 bis 1 000 000). Umschauen durch Ziehen mit der
   Maus, Doppelklick schaut wieder nach vorn.
 - **Standbild speichern** als PNG, wahlweise mit den Werten (β, γ, Projektion, Sichtfeld) im Bild.
-- **Showcase-Bild** (Knopf „✨ Showcase-Bild“ unter „Standbild“): ein Poster in
-  3840 × 2160 zum Herzeigen, auch für Laien verständlich. Enthält das Hauptbild,
-  neu berechnet in 2400 × 1500, und bis zu drei markierte Sterne mit ihren
-  berechneten Werten (eigentliche und gesehene Temperatur samt Farbe,
-  Helligkeitsänderung, wahre und gesehene Richtung, im 3D-Modus die Entfernung).
-  Dazu kommen der Kreis, in den die vordere Himmelshälfte zusammengedrängt ist,
-  ein Vergleichsbild „derselbe Blick in Ruhe“, Faktenkarten in Alltagssprache,
-  das Spektrum des Sonnenlichts in Ruhe und von vorn, die γ-Kurve und die
-  Formeln. Die markierten Sterne werden mit denselben Formeln bewertet wie im
-  Shader (`src/showcase.js`).
+- **Showcase-Bild** (Knopf „✨ Showcase-Bild“ unter „Standbild“): Poster in 3840 × 2160
+  im Stil der Programmoberfläche. Das Simulationsbild füllt das ganze Poster und wird dafür
+  neu gerendert. Darüber liegen halbtransparente Fenster:
+  - **Steuerung:** die Schieberegler (β mit logarithmischer Skala, Sichtfeld, Belichtung),
+    Schalter, Projektion, Spektrum und 3D-Flug im aktuellen Zustand
+  - **Telemetrie:** Fachbegriffe mit Werten, z. B. Lorentzfaktor, Dopplerfaktor,
+    Aberrationswinkel, Raumwinkelkompression, Wien-Maximum, Beaming
+  - **Planck-Spektrum:** in Ruhe und von vorn gesehen
+  - **Referenzbild:** derselbe Blick im Ruhesystem S
+  - **Render-Pipeline:** die Rechenschritte pro Stern mit den Werten eines markierten Sterns
+  - **Code-Fenster:** der echte Shader-Code aus `render.js`
+
+  In der Szene sind bis zu drei Sterne markiert (A, B, C), jeweils mit Fachbegriff,
+  z. B. „Relativistische Blauverschiebung“, und mit ihren berechneten Werten
+  (T → T′, ψ → ψ′, D, F′/F, im 3D-Modus r). Dazu kommen der Aberrationskegel
+  und eine Großanzeige von β, v und γ. Die markierten Sterne werden mit denselben
+  Formeln bewertet wie im Shader (`src/showcase.js`).
 - **Präsentationsmodus** (Knopf „⛶ Präsentation“ oben rechts): Vollbild, sichtbar
   bleiben nur Play/Anhalten, der 3D-Schalter und der Geschwindigkeitsregler. Play
   steuert im 3D-Modus den Flug, sonst die Beschleunigungsphase; Leertaste wirkt

@@ -48,7 +48,7 @@ import {
   accelBetaAt,
 } from './ui.js';
 import { createOverview } from './overview.js';
-import { analyzeStars, pickCallouts, composeShowcase, MAIN_W, MAIN_H, REST_W, REST_H } from './showcase.js';
+import { analyzeStars, pickCallouts, composeShowcase, MAIN_W, MAIN_H, REST_W, REST_H, CALLOUT_REGION } from './showcase.js';
 
 /** Zentraler Zustand der Simulation. UI schreibt hinein, Renderer liest daraus. */
 const state = {
@@ -145,14 +145,21 @@ const ui = createUI(state, {
     sceneVersion++; // Bildschirm wieder normal zeichnen
     const f = state.flight;
     const source = f.enabled ? { mode3d: true, field3d: view.field3d, observer: f.observer } : { mode3d: false, stars };
-    const callouts = pickCallouts(analyzeStars(rs, source, MAIN_W, MAIN_H), MAIN_W);
+    const callouts = pickCallouts(analyzeStars(rs, source, MAIN_W, MAIN_H, CALLOUT_REGION), MAIN_W);
     const starCount = f.enabled ? view.field3d.stats(f.observer).count : state.starCount;
     const blob = await composeShowcase({
       mainImg,
       restImg,
       rs,
       callouts,
-      info: { starCount, mode3d: f.enabled, distanceLy: f.distance },
+      info: {
+        starCount,
+        mode3d: f.enabled,
+        distanceLy: f.distance,
+        tauYears: f.tau / SECONDS_PER_YEAR,
+        exposureMag: state.exposureMag,
+        timeFactorLabel: document.getElementById('time-factor').selectedOptions[0].textContent,
+      },
     });
     const name = `showcase_beta${state.beta.toFixed(4)}${f.enabled ? '_3d' : ''}.png`;
     const a = document.createElement('a');
