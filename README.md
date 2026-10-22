@@ -19,7 +19,7 @@ durch den Auftraggeber in der Seminararbeit und bei jeder Verwendung.
 
 ## Starten
 
-Voraussetzung: Node.js (ab Version 20).
+Voraussetzung: Node.js 26 (mindestens 22.12, das verlangen Vite und Vitest).
 
 ```
 npm install      # einmalig: three.js, Vite, Vitest
