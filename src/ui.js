@@ -304,6 +304,20 @@ export function createUI(state, cb) {
     }
   });
 
+  $('showcase-btn').addEventListener('click', async () => {
+    $('showcase-status').textContent = 'Berechne Showcase-Bild …';
+    $('showcase-btn').disabled = true;
+    // kurz warten, damit die Statuszeile erscheint, bevor gerechnet wird
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      $('showcase-status').textContent = await cb.onShowcase();
+    } catch (e) {
+      $('showcase-status').textContent = `Fehler: ${e.message}`;
+    } finally {
+      $('showcase-btn').disabled = false;
+    }
+  });
+
   // ---- Terrell-Körper ----
   const bodies = state.bodies;
   bindCheckbox('fx-bodies', (v) => {

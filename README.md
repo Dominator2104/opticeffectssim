@@ -19,7 +19,7 @@ durch den Auftraggeber in der Seminararbeit und bei jeder Verwendung.
 
 ## Starten
 
-Voraussetzung: Node.js (ab Version 20).
+Voraussetzung: Node.js 26 (mindestens 22.12, das verlangen Vite und Vitest).
 
 ```
 npm install      # einmalig: three.js, Vite, Vitest
@@ -238,6 +238,23 @@ Beschleunigungsphase sind in beiden vorhanden und immer synchron.
   Belichtung, Sternzahl der Himmelskugel (10 000 bis 1 000 000). Umschauen durch Ziehen mit der
   Maus, Doppelklick schaut wieder nach vorn.
 - **Standbild speichern** als PNG, wahlweise mit den Werten (β, γ, Projektion, Sichtfeld) im Bild.
+- **Showcase-Bild** (Knopf „✨ Showcase-Bild“ unter „Standbild“): Poster in 3840 × 2160
+  im Stil der Programmoberfläche. Das Simulationsbild füllt das ganze Poster und wird dafür
+  neu gerendert. Darüber liegen halbtransparente Fenster:
+  - **Steuerung:** die Schieberegler (β mit logarithmischer Skala, Sichtfeld, Belichtung),
+    Schalter, Projektion, Spektrum und 3D-Flug im aktuellen Zustand
+  - **Telemetrie:** Fachbegriffe mit Werten, z. B. Lorentzfaktor, Dopplerfaktor,
+    Aberrationswinkel, Raumwinkelkompression, Wien-Maximum, Beaming
+  - **Planck-Spektrum:** in Ruhe und von vorn gesehen
+  - **Referenzbild:** derselbe Blick im Ruhesystem S
+  - **Render-Pipeline:** die Rechenschritte pro Stern mit den Werten eines markierten Sterns
+  - **Code-Fenster:** der echte Shader-Code aus `render.js`
+
+  In der Szene sind bis zu drei Sterne markiert (A, B, C), jeweils mit Fachbegriff,
+  z. B. „Relativistische Blauverschiebung“, und mit ihren berechneten Werten
+  (T → T′, ψ → ψ′, D, F′/F, im 3D-Modus r). Dazu kommen der Aberrationskegel
+  und eine Großanzeige von β, v und γ. Die markierten Sterne werden mit denselben
+  Formeln bewertet wie im Shader (`src/showcase.js`).
 - **Präsentationsmodus** (Knopf „⛶ Präsentation“ oben rechts): Vollbild, sichtbar
   bleiben nur Play/Anhalten, der 3D-Schalter und der Geschwindigkeitsregler. Play
   steuert im 3D-Modus den Flug, sonst die Beschleunigungsphase; Leertaste wirkt
@@ -340,6 +357,7 @@ src/
   charts.js         Liniendiagramme auf <canvas>
   overview.js       Reiter „Übersicht“: Diagramme und Tabellen
   overlay.js        Cockpit-Bild, Standbild-Export
+  showcase.js       Showcase-Poster (4K) mit markierten Sternen und Faktenkarten
   style.css
 tests/
   physics.test.js   Vitest
