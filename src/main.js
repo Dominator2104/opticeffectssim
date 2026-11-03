@@ -48,6 +48,7 @@ import {
   accelBetaAt,
 } from './ui.js';
 import { createOverview } from './overview.js';
+import { createExposureView } from './exposureView.js';
 import { analyzeStars, pickCallouts, composeShowcase, MAIN_W, MAIN_H, REST_W, REST_H, CALLOUT_REGION } from './showcase.js';
 
 /** Zentraler Zustand der Simulation. UI schreibt hinein, Renderer liest daraus. */
@@ -245,6 +246,14 @@ const ui = createUI(state, {
     sceneVersion++;
   },
 });
+
+// Belichtung während der Beschleunigung (Vergleich mit dem Film)
+const exposureView = createExposureView({
+  state,
+  overlay,
+  ui,
+  onShowChange: () => sceneVersion++, // beim Ausblenden die Simulation neu zeichnen
+});
 const simCharts = createSimCharts();
 const overviewView = createOverview();
 
@@ -403,7 +412,8 @@ function frame(now) {
     // Nur neu zeichnen, wenn sich etwas geändert hat (spart Grafikkarte und Akku)
     const rs = renderState();
     const sig = `${JSON.stringify(rs)}|${canvas.clientWidth}x${canvas.clientHeight}|${window.devicePixelRatio}|${sceneVersion}`;
-    if (sig !== lastSignature) {
+    // verdeckt das belichtete Bild die Ansicht, muss die Simulation nicht gezeichnet werden
+    if (sig !== lastSignature && !exposureView.isShown()) {
       view.render(rs);
       lastSignature = sig;
       renderCount++;
@@ -418,7 +428,8 @@ function frame(now) {
     renderCount = 0;
     lastUiUpdate = now;
     if (state.tab === 'sim') {
-      updateDebug(debugRows());
+      exposureView.update(now);
+      updateDebug([...debugRows(), ...exposureView.debugRows()]);
       if (state.flight.enabled) updateFlightInfo();
     }
     updateAccelInfo();
@@ -603,5 +614,5 @@ function debugRows() {
 requestAnimationFrame(frame);
 
 // Nur im Entwicklungsmodus: Zugriff für automatische Prüfungen im Browser.
-if (import.meta.env.DEV) window.__sim = { state, view, ui };
+if (import.meta.env.DEV) window.__sim = { state, view, ui, exposureView };
 

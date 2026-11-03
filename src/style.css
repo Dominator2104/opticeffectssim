@@ -48,6 +48,14 @@ body { display: flex; flex-direction: column; }
   object-fit: cover; pointer-events: none; user-select: none;
 }
 
+#exp-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: contain; background: #000; image-rendering: auto;
+}
+#exp-canvas[hidden] { display: none; }
+#view.exposure-on #cockpit, #view.exposure-on #hint { display: none; }
+.row.indent { padding-left: 22px; }
+
 #hint {
   position: absolute; left: 8px; bottom: 6px;
   font-size: 11px; color: var(--muted); pointer-events: none;
