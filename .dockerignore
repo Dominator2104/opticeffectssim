@@ -3,5 +3,3 @@ dist
 .git
 .github
 *.log
-# urheberrechtlich geschütztes Filmbild: niemals ins (öffentliche) Image
-assets/cockpit.png

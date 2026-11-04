@@ -47,9 +47,8 @@ ghcr.io/dominator2104/opticeffectssim:sha-<commit>  # fester Stand
 
 Der Container liefert die Simulation mit nginx (ohne root-Rechte) auf
 **Port 5000** aus, für `linux/amd64` und `linux/arm64`. `/healthz` antwortet
-mit `ok` und wird vom `HEALTHCHECK` benutzt. Das Cockpit-Bild ist nicht
-enthalten (`.dockerignore`); im Container erscheint der Platzhalter, „Bild
-wählen…“ funktioniert.
+mit `ok` und wird vom `HEALTHCHECK` benutzt. Das freigestellte Cockpit-Bild
+ist enthalten und per Haken „Cockpit-Overlay“ einblendbar.
 
 Beispiel für einen Docker-Stack hinter einem vorhandenen nginx (kein Port nach
 außen nötig, nginx und Dienst im selben Netzwerk):
@@ -368,14 +367,18 @@ länger.
 
 ## Cockpit-Bild
 
-Das Standbild des Millennium Falken liefert der Auftraggeber als
-`assets/cockpit.png`. **Es ist urheberrechtlich geschützt: nur lokal verwenden,
-nicht veröffentlichen.** Die Datei steht in `.gitignore` und wird nicht in
-`dist/` kopiert. Der Build sucht sie unter `../assets/cockpit.png`, also im
-Projektordner neben `dist/`. Fehlt sie, erscheint ein Platzhalter. Mit
-„Bild wählen…“ lässt sich das Bild auch direkt auswählen; nur so kann der
-Browser es beim Öffnen per Doppelklick auch ins gespeicherte Standbild
-übernehmen (Sicherheitsregel für Dateien von `file://`).
+Das Cockpit-Overlay ist ein Standbild aus dem Film (urheberrechtlich
+geschützt, Quelle siehe Seminararbeit). Auf Wunsch des Auftraggebers
+(04.11.2026) liegt es als `assets/cockpit.png` im Repository und wird mit der
+Website ausgeliefert. Vorher stand es in `.gitignore` und musste lokal abgelegt
+werden.
+
+`src/overlay.js` importiert die Datei, und Vite legt sie beim Build neben
+`dist/index.html` (`build.assetsDir: ''`, damit der eingebettete Code sie
+relativ zur Seite findet). Das Container-Image enthält `dist/` und damit auch
+das Bild. Eingeblendet wird es mit dem Haken „Cockpit-Overlay“, die Vorgabe
+ist aus. Mit „Bild wählen…“ lässt sich ein anderes Bild laden. Lässt sich das
+Bild nicht laden, erscheint ein gezeichneter Platzhalter.
 
 **Freigestellt (04.11.2026):** Das Standard-Overlay ist ein PNG mit
 Transparenz. Cockpit, Streben, Bögen und die Köpfe sind undurchsichtig, die
@@ -485,7 +488,7 @@ tests/
   stars3d.test.js   Vitest
   motionblur.test.js Vitest (Standbild mit Bewegungsunschärfe)
 assets/
-  cockpit.png       liefert der Auftraggeber (nicht im Repository)
+  cockpit.png       freigestelltes Cockpit-Overlay (Standbild aus dem Film)
 ```
 
 ## Quellen
