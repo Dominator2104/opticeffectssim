@@ -4,23 +4,18 @@
  *
  * overlay.js — Cockpit-Bild über der Simulation.
  *
- * Das Bild (Standbild aus dem Film) liefert der Auftraggeber als
- * assets/cockpit.png. ES IST URHEBERRECHTLICH GESCHÜTZT: nur lokal verwenden,
- * nicht veröffentlichen. Die Datei steht deshalb in .gitignore und wird auch
- * nicht in den Build (dist/) kopiert.
+ * Das Bild ist ein Standbild aus dem Film (urheberrechtlich geschützt, Quelle
+ * siehe Seminararbeit), freigestellt: Cockpit, Streben und Köpfe deckend,
+ * die Fensterflächen durchsichtig. Es liegt als assets/cockpit.png im
+ * Repository und wird – auf Wunsch des Auftraggebers vom 04.11.2026 – mit
+ * der Website ausgeliefert: Vite kopiert die importierte Datei nach
+ * dist/assets/, das Container-Image enthält dist/.
  *
- * Fehlt die Datei, erscheint ein gezeichneter Platzhalter; das Programm läuft
- * in jedem Fall weiter. Über "Bild wählen…" kann das Bild auch direkt
- * ausgewählt werden (nötig z. B., wenn der Build von einem anderen Ort aus
- * geöffnet wird).
+ * Lässt es sich nicht laden, erscheint ein gezeichneter Platzhalter; das
+ * Programm läuft in jedem Fall weiter. Über "Bild wählen…" kann ein anderes
+ * Bild gewählt werden.
  */
-
-/**
- * Orte, an denen nach dem Bild gesucht wird, der Reihe nach:
- *   ./assets/cockpit.png   Entwicklungsserver (npm run dev)
- *   ../assets/cockpit.png  Build, geöffnet als dist/index.html im Projektordner
- */
-const CANDIDATE_URLS = ['./assets/cockpit.png', '../assets/cockpit.png'];
+import cockpitUrl from '../assets/cockpit.png';
 
 /**
  * Platzhalter als SVG: dunkler Rahmen mit durchsichtigem Fenster und zwei
@@ -33,7 +28,7 @@ function placeholderDataUrl() {
   <rect width="1600" height="900" fill="#1a1d24" mask="url(#m)"/>
   <path d="M800 120 L800 700 M520 120 L330 700 M1080 120 L1270 700" stroke="#1a1d24" stroke-width="18"/>
   <text x="800" y="800" fill="#8a93a6" font-family="sans-serif" font-size="34" text-anchor="middle">
-    Platzhalter – assets/cockpit.png nicht gefunden (Bild wählen…)</text>
+    Platzhalter – Cockpit-Bild nicht ladbar (Bild wählen…)</text>
 </svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
@@ -55,18 +50,16 @@ function tryLoad(img, url) {
 export function createCockpitOverlay(img) {
   let visible = false;
   let opacity = 1;
-  let status = 'Suche assets/cockpit.png …';
+  let status = 'lade Cockpit-Bild …';
   let objectUrl = null;
 
   (async () => {
-    for (const url of CANDIDATE_URLS) {
-      if (await tryLoad(img, url)) {
-        status = `geladen: ${url}`;
-        return;
-      }
+    if (await tryLoad(img, cockpitUrl)) {
+      status = 'Standard-Cockpit (freigestelltes Filmbild)';
+      return;
     }
     await tryLoad(img, placeholderDataUrl());
-    status = 'Platzhalter (assets/cockpit.png fehlt)';
+    status = 'Platzhalter (Cockpit-Bild nicht ladbar)';
   })();
 
   function apply() {

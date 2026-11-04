@@ -49,6 +49,9 @@ export default defineConfig({
   build: {
     // alles in eine Datei, damit das Einbetten vollständig ist
     modulePreload: false,
+    // Bilder (Cockpit) direkt neben index.html: Der eingebettete Code findet sie
+    // relativ zur Seite (new URL(…, import.meta.url))
+    assetsDir: '',
     chunkSizeWarningLimit: 2000,
   },
   test: {

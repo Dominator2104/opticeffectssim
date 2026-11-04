@@ -4,8 +4,8 @@
 # Container-Image der Simulation: statische Auslieferung von dist/ mit nginx
 # auf Port 5000 (gedacht hinter einem vorgeschalteten Reverse-Proxy).
 #
-# Das urheberrechtlich geschützte Cockpit-Bild ist NICHT enthalten
-# (.dockerignore); im Container erscheint der Platzhalter bzw. "Bild wählen…".
+# Das freigestellte Cockpit-Bild (assets/cockpit.png) ist im Build enthalten
+# (Entscheidung des Auftraggebers vom 04.11.2026).
 
 # --- Stufe 1: bauen ----------------------------------------------------------
 # Läuft auf der Plattform des Build-Rechners, auch wenn für mehrere
