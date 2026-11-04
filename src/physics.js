@@ -701,6 +701,294 @@ export function fluxFromAbsoluteMagnitude(M, rLy) {
 }
 
 /* ------------------------------------------------------------------------- */
+/* 8. Belichtung während der Beschleunigung (Vergleich mit dem Film)         */
+/* ------------------------------------------------------------------------- */
+/*
+ * Ergänzt am 03.11.2026 (Claude Code, KI-Werkzeug, im Auftrag von Dominik
+ * Wittkow). Ein Filmbild entsteht mit endlicher Belichtungszeit t_b. Ändert
+ * sich β während t_b, wandert jeder Stern auf dem Bild und hinterlässt einen
+ * Streifen. Streifen entstehen hier AUSSCHLIESSLICH aus dieser Rechnung:
+ * Belichtungsintervall in Teilschritte zerlegen, in jedem Schritt mit dem
+ * momentanen β Lage, D und Helligkeit bestimmen, Licht linear aufsummieren.
+ */
+
+/**
+ * Wanderung eines Sterns beim Beschleunigen:
+ *
+ *   dψ'/dβ = −γ² · sin ψ'
+ *
+ * Herleitung: Aus cos ψ' = (cos ψ + β)/(1 + β cos ψ) folgt bei festem ψ
+ *   d(cos ψ')/dβ = sin²ψ / (1 + β cos ψ)² = γ² sin²ψ'
+ * (wegen sin ψ' = sin ψ / (γ (1 + β cos ψ))), und d(cos ψ') = −sin ψ' dψ'.
+ * Das Vorzeichen ist negativ: Beim Beschleunigen wandern alle Sterne zum
+ * Fluchtpunkt hin (ψ' wird kleiner).
+ */
+export function aberrationAngleRate(beta, psiPrime) {
+  const g = lorentzGamma(beta);
+  return -g * g * Math.sin(psiPrime);
+}
+
+/**
+ * Konstante Eigenbeschleunigung in Bordzeit τ: Die Rapidität η = artanh β
+ * wächst linear mit der Eigenzeit, η(τ) = η₀ + a·τ/c. Also
+ *
+ *   β(τ) = tanh(artanh β₀ + a·τ/c),   aus der Ruhe:  β = tanh(a·τ/c).
+ *
+ * Dieselbe Bewegung wie betaConstantProperAcceleration() (dort in der Zeit t
+ * in S); beide gehen über τ = (c/a)·arsinh(a·t/c) ineinander über (getestet).
+ */
+export function betaHyperbolicProperTime(a, tau, beta0 = 0) {
+  return Math.tanh(Math.atanh(beta0) + (a * tau) / C);
+}
+
+/**
+ * Eigenbeschleunigung, mit der in der Bordzeit τ von β₀ auf β₁ beschleunigt
+ * wird:  a = c · |artanh β₁ − artanh β₀| / τ.
+ * Filmszene (β = 0 → 0,99 in 3 s): a ≈ 2,645·10⁸ m/s².
+ */
+export function properAccelerationForProperTime(beta0, beta1, tau) {
+  return (C * Math.abs(Math.atanh(beta1) - Math.atanh(beta0))) / tau;
+}
+
+/**
+ * β als Funktion der Bordzeit τ für eine Kurve der Beschleunigungsphase.
+ * Die Kurven selbst sind in der Zeit t in S angegeben (accelerationBeta),
+ * die Kamera an Bord belichtet aber in ihrer Eigenzeit τ (τ = 0 beim Beginn).
+ *
+ *   konstante Eigenbeschleunigung: geschlossen über die Rapidität (siehe
+ *     oben); Dauer an Bord τ_E = T · |η₁ − η₀| / |u₁ − u₀|, weil
+ *     a = c·|u₁ − u₀|/T (accelerationFromDuration) und τ_E = c·|η₁ − η₀|/a.
+ *   andere Kurven: τ(t) = ∫ dt/γ numerisch (Trapezregel mit n Schritten),
+ *     umgekehrt durch Intervallhalbierung und lineare Interpolation.
+ *
+ * Vor dem Beginn (τ < 0) gilt β₀, nach dem Ende (τ > τ_E) bleibt β = β₁.
+ *
+ * @returns {{tauEnd:number, betaAt:(tau:number)=>number, tAt:(tau:number)=>number}}
+ *   tAt: Zeit t in S zur Bordzeit τ (für die Anzeige)
+ */
+export function accelerationProfileProperTime(curve, T, beta0, beta1, n = 4096) {
+  if (!(T > 0) || beta0 === beta1) {
+    const g = lorentzGamma(beta0);
+    return { tauEnd: 0, betaAt: () => beta0, tAt: (tau) => tau * g };
+  }
+  const g0 = lorentzGamma(beta0);
+  const g1 = lorentzGamma(beta1);
+  if (curve === 'constant') {
+    const e0 = Math.atanh(beta0);
+    const e1 = Math.atanh(beta1);
+    const u0 = properVelocity(beta0);
+    const u1 = properVelocity(beta1);
+    const tauEnd = (T * Math.abs(e1 - e0)) / Math.abs(u1 - u0);
+    const betaAt = (tau) => Math.tanh(e0 + (e1 - e0) * clamp01(tau / tauEnd));
+    const tAt = (tau) => {
+      if (tau <= 0) return tau * g0;
+      if (tau >= tauEnd) return T + (tau - tauEnd) * g1;
+      return (T * (Math.sinh(e0 + (e1 - e0) * (tau / tauEnd)) - u0)) / (u1 - u0);
+    };
+    return { tauEnd, betaAt, tAt };
+  }
+  const h = T / n;
+  const taus = new Float64Array(n + 1);
+  let prev = 1 / g0;
+  for (let i = 1; i <= n; i++) {
+    const b = accelerationBeta(curve, i * h, T, beta0, beta1);
+    const inv = Math.sqrt(1 - b * b);
+    taus[i] = taus[i - 1] + 0.5 * (prev + inv) * h;
+    prev = inv;
+  }
+  const tauEnd = taus[n];
+  const tAt = (tau) => {
+    if (tau <= 0) return tau * g0;
+    if (tau >= tauEnd) return T + (tau - tauEnd) * g1;
+    let lo = 0;
+    let hi = n;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (taus[mid] <= tau) lo = mid;
+      else hi = mid;
+    }
+    return (lo + (tau - taus[lo]) / (taus[hi] - taus[lo])) * h;
+  };
+  const betaAt = (tau) => {
+    if (tau <= 0) return beta0;
+    if (tau >= tauEnd) return beta1;
+    return accelerationBeta(curve, tAt(tau), T, beta0, beta1);
+  };
+  return { tauEnd, betaAt, tAt };
+}
+
+/**
+ * Geradlinige (gnomonische) Kamera wie im Auswertungsprogramm der Arbeit
+ * (szene_analysieren.py, brennweite_px):
+ *
+ *   f = (Breite / 2) / tan(Bildfeld / 2),   Abstand zum Fluchtpunkt r = f · tan ψ'.
+ *
+ * Die Kameraachse zeigt in Flugrichtung (+z). Ihr Durchstoßpunkt durch die
+ * Bildebene (Hauptpunkt) ist deshalb zugleich der Fluchtpunkt (cx, cy); er
+ * darf außerhalb der Bildmitte liegen (verschobenes Objektiv).
+ * Pixelkoordinaten: x nach rechts, y nach unten, (0, 0) = linke obere Ecke
+ * des linken oberen Pixels.
+ */
+export function rectilinearCamera({ width, height, hfovDeg, cx = width / 2, cy = height / 2 }) {
+  return { width, height, hfovDeg, cx, cy, f: width / 2 / Math.tan(rad(hfovDeg) / 2) };
+}
+
+/**
+ * Bildpunkt einer gesehenen Richtung n' im Raumschiffsystem (x links, y oben,
+ * z vorn, wie in der ganzen Simulation):
+ *
+ *   x = cx − f · n'x / n'z,    y = cy − f · n'y / n'z
+ *
+ * Richtungen mit n'z ≤ 0 (90° oder mehr zur Flugrichtung) haben keinen
+ * Bildpunkt → null.
+ */
+export function projectRectilinear(cam, n) {
+  if (!(n[2] > 0)) return null;
+  return [cam.cx - (cam.f * n[0]) / n[2], cam.cy - (cam.f * n[1]) / n[2]];
+}
+
+/**
+ * Relative Bestrahlungsstärke F'/F eines Sterns beim Wellenlängenverhältnis D
+ * und die gesehene Temperatur — genau wie im Shader (render.js, starAppearance):
+ *
+ *   nur sichtbares Licht:  F'/F = D^(−2) · Y(T')/Y(T) · (T/T')⁴ = D² · Y(T')/Y(T)
+ *     Das ist die Bandformel F'_λ'(λ') = D⁻³ F_λ(λ'/D) für einen Schwarzkörper,
+ *     integriert mit der Hellempfindlichkeit ȳ (wegen B_λ(λ/D, T) = D⁵ B_λ(λ, T/D)).
+ *   gesamtes Spektrum:     F'/F = D^(−2) · k(T)   (bolometrisch, k siehe bolometricToVisibleRatio)
+ *
+ * Schalter: beaming (Faktor D^(−2)), doppler (T' = T/D statt T).
+ *
+ * @param {(T:number)=>number} Y  sichtbare Helligkeit Y(T) (blackbody.js)
+ * @returns {{factor:number, Tseen:number}}
+ */
+export function starFluxFactor(D, T, Y, { beaming = true, doppler = true, fullSpectrum = false } = {}) {
+  const Tseen = doppler ? apparentTemperature(T, D) : T;
+  let factor = beaming ? beamingPointSource(D) : 1;
+  if (fullSpectrum) factor *= bolometricToVisibleRatio(T, Y);
+  else factor *= visibleSpectralFactor(T, Tseen, Y(T), Y(Tseen));
+  return { factor, Tseen };
+}
+
+/** Größte Rekursionstiefe beim Halbieren (2⁴⁰ Teilschritte – wird nie erreicht). */
+const EXPOSURE_MAX_DEPTH = 40;
+
+/**
+ * Belichtung EINES Sterns während des Intervalls [τ_m − t_b/2, τ_m + t_b/2]
+ * (Bordzeit, die Kamera ist an Bord).
+ *
+ * Das Intervall wird so lange halbiert, bis der Bildpunkt in jedem
+ * Teilschritt höchstens maxStepPx wandert und sich die Helligkeit um
+ * höchstens 1 % ändert. In jedem Teilschritt gilt das momentane β in seiner
+ * Mitte; daraus folgen die Lage (Aberration), D und die Helligkeit. Die
+ * Lichtmenge eines Schritts ist
+ *
+ *   w = Helligkeit(D) · Δτ / t_b
+ *
+ * also der zeitliche Mittelwert über die Belichtung: t_b ändert die Länge
+ * der Streifen, aber nicht die Helligkeit eines ruhenden Sterns. Die Summe
+ * aller w ist das Gesamtlicht. Bei t_b = 0 gibt es genau einen Schritt bei
+ * τ_m mit w = Helligkeit(D) – das bisherige Einzelbild.
+ *
+ * Die Kamera steht still (Achse in Flugrichtung), bewegt wird nur durch β(τ).
+ * Weil φ' = φ ist, läuft jeder Bildpunkt auf einer Geraden durch den
+ * Fluchtpunkt; der Abstand r = f·tan ψ' ändert sich monoton. Teilschritte,
+ * die ganz außerhalb des Bildes (plus Rand) liegen, werden nicht weiter
+ * zerlegt; ihr Licht zählt zum Gesamtlicht, wird aber nicht abgelegt.
+ *
+ * @param {number[]} n   Richtung zum Stern in S (Einheitsvektor)
+ * @param {object}   o
+ * @param {(tau:number)=>number} o.betaAt  β zur Bordzeit τ
+ * @param {number}   o.tauMid      Bordzeit der Bildmitte τ_m in s
+ * @param {number}   o.exposure    Belichtungszeit t_b in s (≥ 0)
+ * @param {object}   o.camera      rectilinearCamera()
+ * @param {(D:number)=>number} [o.brightness]  Helligkeit beim Wert D (Vorgabe D^(−2))
+ * @param {number}   [o.maxStepPx=1]  größte Wanderung je Teilschritt in Pixeln
+ * @param {boolean}  [o.aberration=true]
+ * @param {number}   [o.marginPx=0]   Rand um das Bild, in dem Licht noch abgelegt wird
+ */
+export function exposeStar(n, o) {
+  const cam = o.camera;
+  const maxStep = o.maxStepPx ?? 1;
+  const aberration = o.aberration ?? true;
+  const brightness = o.brightness ?? beamingPointSource;
+  const margin = o.marginPx ?? 0;
+  const tb = o.exposure;
+  const tau0 = o.tauMid - tb / 2;
+  const tau1 = o.tauMid + tb / 2;
+
+  // Strahl vom Fluchtpunkt aus, auf dem der Bildpunkt läuft, und sein Abstand
+  // bis zum Bildrand (plus Rand). Liegt der Stern genau auf der Achse, bleibt
+  // er im Fluchtpunkt.
+  const perp = Math.hypot(n[0], n[1]);
+  let rExit = Infinity;
+  if (perp > 0) {
+    const edge = (u, c, size) => (u > 0 ? (size + margin - c) / u : u < 0 ? (-margin - c) / u : Infinity);
+    rExit = Math.min(edge(-n[0] / perp, cam.cx, cam.width), edge(-n[1] / perp, cam.cy, cam.height));
+  }
+
+  const at = (tau) => {
+    const beta = o.betaAt(tau);
+    const D = dopplerFactor(beta, n[2]);
+    const seen = aberration ? aberrateDirection(beta, n) : n;
+    const p = projectRectilinear(cam, seen);
+    const r = p ? Math.hypot(p[0] - cam.cx, p[1] - cam.cy) : Infinity;
+    return { tau, beta, D, seen, p, r, w: brightness(D) };
+  };
+  const inside = (p) => p[0] >= -margin && p[0] < cam.width + margin && p[1] >= -margin && p[1] < cam.height + margin;
+
+  const steps = [];
+  let total = 0;
+  let stepCount = 0;
+  let largestMove = 0;
+  const emit = (m, fraction, move) => {
+    const w = m.w * fraction;
+    total += w;
+    stepCount++;
+    if (m.p && inside(m.p)) {
+      steps.push({ x: m.p[0], y: m.p[1], w, D: m.D });
+      if (move > largestMove) largestMove = move;
+    }
+  };
+  const split = (s, e, depth) => {
+    const m = at(0.5 * (s.tau + e.tau));
+    const fraction = (e.tau - s.tau) / tb;
+    const move = Math.abs(e.r - s.r);
+    if (Math.min(s.r, e.r) > rExit) {
+      emit(m, fraction, 0); // ganz außerhalb des Bildes
+      return;
+    }
+    const steady = move <= maxStep && Math.abs(e.w - s.w) <= 0.01 * Math.max(e.w, s.w);
+    if (steady || depth >= EXPOSURE_MAX_DEPTH) {
+      emit(m, fraction, move);
+      return;
+    }
+    split(s, m, depth + 1);
+    split(m, e, depth + 1);
+  };
+
+  const start = at(tau0);
+  const end = tb > 0 ? at(tau1) : start;
+  if (tb > 0) split(start, end, 0);
+  else emit(start, 1, 0);
+
+  return {
+    steps,
+    total,
+    stepCount,
+    largestMovePx: largestMove,
+    betaStart: start.beta,
+    betaEnd: end.beta,
+    DStart: start.D,
+    DEnd: end.D,
+    psiStart: Math.acos(clampCos(start.seen[2])),
+    psiEnd: Math.acos(clampCos(end.seen[2])),
+    pStart: start.p,
+    pEnd: end.p,
+    streakPx: start.p && end.p ? Math.hypot(end.p[0] - start.p[0], end.p[1] - start.p[1]) : NaN,
+  };
+}
+
+/* ------------------------------------------------------------------------- */
 /* Hilfsfunktionen                                                           */
 /* ------------------------------------------------------------------------- */
 
