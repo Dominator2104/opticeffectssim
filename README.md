@@ -380,19 +380,27 @@ Browser es beim Öffnen per Doppelklick auch ins gespeicherte Standbild
 **Freigestellt (04.11.2026):** Das Standard-Overlay ist ein PNG mit
 Transparenz. Cockpit, Streben, Bögen und die Köpfe sind undurchsichtig, die
 Fensterflächen sind durchsichtig. Dort erscheint der simulierte Himmel statt
-der Sterne des Films. Die Kante ist auf etwa 1 Pixel weichgezeichnet.
+der Sterne des Films.
 Die Vorgabe für die Deckkraft ist deshalb 100 %; vorher waren es 90 %,
 damit der Himmel durch ein undurchsichtiges Bild schien.
 
-So wurde freigestellt:
-- Himmel ist, was nach dem Entfernen der Sterne (morphologisches Öffnen) sehr
-  dunkel und glatt ist.
-- Er muss außerdem in einer zusammenhängenden Fläche mit Sternen liegen. So
-  bleiben die schwarzen Cockpitecken außerhalb des Fensterrahmens erhalten.
-- Die Kanten an Haaren und Streben hat danach GrabCut (OpenCV) verfeinert.
-
-Kleine Ungenauigkeiten bleiben an den sehr dunklen Schattenseiten einzelner
-Streben.
+So wurde freigestellt (überarbeitet):
+- **Sterne entfernen, Linien erhalten:** Öffnen mit Linienelementen der Länge
+  11 px in 12 Richtungen. Das entfernt runde Sterne, erhält aber dünne Leisten
+  an Streben und Bögen.
+- **Fensterflächen ausdrücklich festgelegt:** sieben Scheiben innerhalb des
+  Rahmens und die beiden Bereiche oben links und oben rechts außerhalb der
+  äußeren Bögen. Dunkle Flächen im Fell, in der Wand und in der Maschinerie
+  oben links bleiben Cockpit.
+- **Grenze im Saum dazwischen:** Watershed-Segmentierung auf dem Kantenbild.
+  Sicheres Cockpit ist alles Helle (Streben, Fell, Sitze), sicherer Himmel das
+  Innere der Fensterflächen. Die Grenze liegt so auf der stärksten Kante.
+- **Fugen** bis 4 px zwischen Leiste und Strebe zählen zum Bauteil.
+- **Äußere Leiste der linken oberen Strebe:** Wo sie zu schwach für die
+  automatische Erkennung ist, wurde sie aus Querprofilen vermessen (leicht
+  gekrümmte Linie) und samt Fuge eingetragen.
+- **Deckkraft:** Cockpit, Köpfe und Sitze sind vollständig deckend. Nur an der
+  Grenze zum Himmel ist die Kante um etwa einen halben Pixel geglättet.
 
 ## Darstellungsentscheidungen (keine Physik)
 
