@@ -26,6 +26,10 @@ import {
   coordinateTimeStep,
   distanceStepLy,
   SECONDS_PER_YEAR,
+  properAccelerationForProperTime,
+  motionBlurBetaAt,
+  motionBlurSchedule,
+  motionBlurStepCount,
   deg,
   rad,
 } from './physics.js';
@@ -46,9 +50,9 @@ import {
   formatTime,
   accelTiming,
   accelBetaAt,
+  fractionText,
 } from './ui.js';
 import { createOverview } from './overview.js';
-import { createExposureView } from './exposureView.js';
 import { analyzeStars, pickCallouts, composeShowcase, MAIN_W, MAIN_H, REST_W, REST_H, CALLOUT_REGION } from './showcase.js';
 
 /** Zentraler Zustand der Simulation. UI schreibt hinein, Renderer liest daraus. */
@@ -92,6 +96,13 @@ const state = {
     t: 0, // vergangene Zeit in S in s
     distance: 0, // zurückgelegte Strecke in S (Lj)
     anchors: null, // feste Positionen der Körper in S (Lj)
+  },
+  // Standbild mit Bewegungsunschärfe im 3D-Flug (Werte setzt ui.js)
+  blur: {
+    tb: 1 / 48, // Verschlusszeit in s (24 Bilder/s, 180°-Umlaufverschluss)
+    dv: 0.99, // Geschwindigkeitsänderung Δv in Einheiten von c …
+    dt: 3, // … in der Zeit Δt in s (Vorgabe: Filmszene 00:56:54 → 00:56:57)
+    last: null, // Kennwerte des letzten Bildes (Debug-Panel)
   },
   // Beschleunigungsphase (Werte setzt ui.js aus den Bedienelementen)
   accel: {
@@ -170,6 +181,52 @@ const ui = createUI(state, {
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
     return `${name} gespeichert (3840 × 2160, ${callouts.length} Sterne markiert).`;
   },
+  async onBlurExport(withCaption) {
+    const f = state.flight;
+    if (!f.enabled) return 'Nur im 3D-Modus verfügbar.';
+    const bl = state.blur;
+    const a = blurAcceleration();
+    const betaEnd = state.beta;
+    const steps = motionBlurStepCount({
+      a, exposure: bl.tb, betaEnd, pxPerRadian: maxPixelsPerRadian(), nearestLy: nearestObjectLy(),
+    });
+    const plan = motionBlurSchedule({ betaEnd, a, exposure: bl.tb, steps });
+    // Teilbilder: β und Beobachterort setzen, rendern, danach alles zurück
+    const savedObserver = [...f.observer];
+    const t0 = performance.now();
+    let result;
+    try {
+      result = view.renderAccumulated(plan.length, (i) => {
+        const p = plan[i];
+        state.beta = p.beta;
+        f.observer = [savedObserver[0], savedObserver[1], savedObserver[2] + p.dzLy];
+        view.field3d.setObserver(f.observer);
+        return { state: renderState(), weight: p.weight };
+      });
+    } finally {
+      state.beta = betaEnd;
+      state.gamma = lorentzGamma(betaEnd);
+      f.observer = savedObserver;
+      view.field3d.setObserver(savedObserver);
+      sceneVersion++;
+    }
+    const ms = performance.now() - t0;
+    bl.last = { steps: plan.length, betaStart: motionBlurBetaAt(betaEnd, a, -bl.tb), ms, precision: result.precision };
+    const caption = withCaption
+      ? `β = ${formatNumber(motionBlurBetaAt(betaEnd, a, -bl.tb), 5)} → ${formatNumber(betaEnd, 5)} · ` +
+        `Verschlusszeit ${fractionText(bl.tb)} s · a = ${formatNumber(a, 4)} m/s² (Δv = ${formatNumber(bl.dv, 3)} c in ${formatNumber(bl.dt, 3)} s) · ` +
+        `${plan.length} Teilbilder`
+      : null;
+    const { blob, withoutCockpit } = await composeSnapshot(result.canvas, overlay, caption);
+    const name = `bewegungsunschaerfe_beta${betaEnd.toFixed(4)}_tb${fractionText(bl.tb).replace('/', '-')}.png`;
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+    return `${name} gespeichert (${result.canvas.width} × ${result.canvas.height}, ${plan.length} Teilbilder, ${ms.toFixed(0)} ms)` +
+      (withoutCockpit ? ' – OHNE Cockpit (Bild aus Datei-Pfad; „Bild wählen…“ benutzen).' : '.');
+  },
   onStarCount(n) {
     state.starCount = n;
     stars = generateStars(n);
@@ -245,14 +302,6 @@ const ui = createUI(state, {
     if (tab === 'sim') view.resize();
     sceneVersion++;
   },
-});
-
-// Belichtung während der Beschleunigung (Vergleich mit dem Film)
-const exposureView = createExposureView({
-  state,
-  overlay,
-  ui,
-  onShowChange: () => sceneVersion++, // beim Ausblenden die Simulation neu zeichnen
 });
 const simCharts = createSimCharts();
 const overviewView = createOverview();
@@ -412,8 +461,7 @@ function frame(now) {
     // Nur neu zeichnen, wenn sich etwas geändert hat (spart Grafikkarte und Akku)
     const rs = renderState();
     const sig = `${JSON.stringify(rs)}|${canvas.clientWidth}x${canvas.clientHeight}|${window.devicePixelRatio}|${sceneVersion}`;
-    // verdeckt das belichtete Bild die Ansicht, muss die Simulation nicht gezeichnet werden
-    if (sig !== lastSignature && !exposureView.isShown()) {
+    if (sig !== lastSignature) {
       view.render(rs);
       lastSignature = sig;
       renderCount++;
@@ -428,11 +476,11 @@ function frame(now) {
     renderCount = 0;
     lastUiUpdate = now;
     if (state.tab === 'sim') {
-      exposureView.update(now);
-      updateDebug([...debugRows(), ...exposureView.debugRows()]);
+      updateDebug(debugRows());
       if (state.flight.enabled) updateFlightInfo();
     }
     updateAccelInfo();
+    updateBlurInfo();
   }
   if (state.presenting) ui.setPresentPlaying(state.flight.enabled ? state.flight.running : state.accel.running);
 
@@ -528,6 +576,58 @@ function renderState() {
   };
 }
 
+/* ------------------------------------------------------------------------- */
+/* Standbild mit Bewegungsunschärfe                                          */
+/* ------------------------------------------------------------------------- */
+
+/** Eigenbeschleunigung während der Belichtung aus Δv und Δt: a = c·artanh(Δv/c)/Δt. */
+function blurAcceleration() {
+  const b = state.blur;
+  return b.dv > 0 && b.dt > 0 ? properAccelerationForProperTime(0, b.dv, b.dt) : 0;
+}
+
+/**
+ * Größte Bildskala in Pixeln je Bogenmaß, in der Bildecke (dort streckt die
+ * Projektion am stärksten): Perspektive r = f·tan α → dr/dα = f·(1 + tan²α);
+ * stereografisch r ∝ tan(α/2) → dr/dα = r'(0)·(1 + tan²(α/2)).
+ */
+function maxPixelsPerRadian() {
+  const W = canvas.width;
+  const H = canvas.height;
+  const half = rad(state.fovDeg) / 2;
+  const rc = Math.hypot(W / 2, H / 2);
+  if (state.projection === 'stereographic') {
+    const t = Math.tan(half / 2);
+    const tc = (rc * t) / (H / 2);
+    return (H / 2 / (2 * t)) * (1 + tc * tc);
+  }
+  const f = H / 2 / Math.tan(half);
+  return (f * f + rc * rc) / f;
+}
+
+/** Abstand zum nächsten Stern oder Körper (Lj), für die Parallaxe während der Belichtung. */
+function nearestObjectLy() {
+  const f = state.flight;
+  let r = view.field3d.stats(f.observer).nearest;
+  if (state.bodies.enabled && f.anchors) {
+    for (const a of [f.anchors.cube, f.anchors.sphere]) {
+      const d = Math.hypot(a[0] - f.observer[0], a[1] - f.observer[1], a[2] - f.observer[2]);
+      r = Math.min(r, Math.max(1e-3, d - 1.8)); // Würfelecke höchstens √3 Lj vom Mittelpunkt
+    }
+  }
+  return r;
+}
+
+function updateBlurInfo() {
+  const a = blurAcceleration();
+  const bl = state.blur;
+  ui.setBlurInfo(
+    `a = ${formatNumber(a, 4)} m/s² (${formatNumber(a / 9.80665, 3)} g) · ` +
+      `β während der Belichtung ${formatNumber(motionBlurBetaAt(state.beta, a, -bl.tb), 5)} → ${formatNumber(state.beta, 5)}` +
+      (state.flight.enabled ? '' : ' · nur im 3D-Modus'),
+  );
+}
+
 /** Anzeige unter den Knöpfen der Beschleunigungsphase (in beiden Ansichten). */
 function updateAccelInfo() {
   const acc = state.accel;
@@ -607,6 +707,10 @@ function debugRows() {
       : '–'],
     ['Modus', state.flight.enabled ? '3D-Flug' : 'Himmelskugel'],
     ['Sterne', state.flight.enabled ? `${flightStats.count.toLocaleString('de-DE')} (3D)` : state.starCount.toLocaleString('de-DE')],
+    ['Bewegungsunschärfe: Verschlusszeit', `${fractionText(state.blur.tb)} s`],
+    ['  a = c·artanh(Δv/c)/Δt', `${num(blurAcceleration(), 4)} m/s²`],
+    ['  β bei Verschlussöffnung → Ende', `${num(motionBlurBetaAt(beta, blurAcceleration(), -state.blur.tb), 6)} → ${num(beta, 6)}`],
+    ['  Teilbilder (letztes Bild)', state.blur.last ? `${state.blur.last.steps} (${state.blur.last.precision}, ${state.blur.last.ms.toFixed(0)} ms)` : '–'],
     ['Bildrate (gezeichnet)', `${renderFps.toFixed(0)} Bilder/s`],
     ['  Schleife', `${fps.toFixed(0)} Durchläufe/s`],
   ];
@@ -614,5 +718,5 @@ function debugRows() {
 requestAnimationFrame(frame);
 
 // Nur im Entwicklungsmodus: Zugriff für automatische Prüfungen im Browser.
-if (import.meta.env.DEV) window.__sim = { state, view, ui, exposureView };
+if (import.meta.env.DEV) window.__sim = { state, view, ui };
 

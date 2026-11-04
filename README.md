@@ -130,9 +130,8 @@ welche Funktion aus `physics.js` sie übersetzt.
 | Visuell → bolometrisch | `k(T) = (T/5800 K)⁴ · Y(5800 K)/Y(T)`; im Modus „gesamtes Spektrum“ wird die (visuelle) Grundhelligkeit damit umgerechnet | `bolometricToVisibleRatio` | bolometrische Korrektur eines Schwarzkörpers relativ zur Sonne |
 | Anteil im Sichtbaren | `f(T) = ∫₃₈₀⁷⁸⁰ B_λ dλ / (σT⁴/π)` | `visibleFraction` (blackbody.js) | Stefan-Boltzmann; Kennzeichnung „nur UV/IR“ bei `f < 1 %` |
 | Wanderung beim Beschleunigen | `dψ'/dβ = −γ²·sin ψ'`; bei konstanter Eigenbeschleunigung `dψ'/dτ = −(a/c)·sin ψ'` | `aberrationAngleRate` | aus der Aberrationsformel, im Kommentar hergeleitet |
-| Hyperbelbewegung in Bordzeit | `β(τ) = tanh(artanh β₀ + aτ/c)`, Filmszene `β = tanh(aτ/c)`, `a = c·artanh(0,99)/3 s` | `betaHyperbolicProperTime`, `properAccelerationForProperTime`, `accelerationProfileProperTime` | Rapidität wächst linear mit der Eigenzeit; gegen `betaConstantProperAcceleration` getestet |
-| Belichtung | Licht eines Sterns `= Σ F'(D(τᵢ))·Δτᵢ/t_b`, Lage aus `β(τᵢ)` | `exposeStar`, `starFluxFactor` | Abschnitt „Belichtung während der Beschleunigung“ unten |
-| Kamera für den Filmvergleich | geradlinig, `r = f·tan ψ'`, `f = (B/2)/tan(Bildfeld/2)` | `rectilinearCamera`, `projectRectilinear` | wie `brennweite_px` in `szene_analysieren.py` |
+| Hyperbelbewegung in Eigenzeit | `β(τ) = tanh(artanh β₀ + aτ/c)`, `a = c·artanh(Δv/c)/Δt` | `betaHyperbolicProperTime`, `properAccelerationForProperTime` | Rapidität wächst linear mit der Eigenzeit; gegen `betaConstantProperAcceleration` getestet |
+| Bewegungsunschärfe | Teilbilder mit `β(τᵢ)` und Ort `z(τᵢ)`, Gewicht `1/n`, linear summiert | `motionBlurBetaAt`, `motionBlurOffsetLy`, `motionBlurSchedule`, `motionBlurStepCount` | Abschnitt „Standbild mit Bewegungsunschärfe“ unten |
 
 Farbe (`src/blackbody.js`): Planck-Spektrum `B_λ(λ, T)` wird über 380–780 nm
 gegen die CIE-1931-Normspektralwertfunktionen (2°-Normalbeobachter, 5-nm-Schritte,
@@ -159,8 +158,8 @@ Spektrum des Sterns als vollständiges Planck-Spektrum annimmt.
 ## Tests
 
 `npm test` führt `tests/physics.test.js`, `tests/blackbody.test.js`,
-`tests/stars3d.test.js` und `tests/exposure.test.js` aus (76 Tests; die 22 Tests
-der Belichtung sind unten im Abschnitt „Belichtung während der Beschleunigung“ aufgeführt). Sollwerte bei β = 0,9:
+`tests/stars3d.test.js` und `tests/motionblur.test.js` aus (67 Tests; die 13 Tests
+der Bewegungsunschärfe sind unten im Abschnitt „Standbild mit Bewegungsunschärfe“ aufgeführt). Sollwerte bei β = 0,9:
 
 | Größe | Sollwert |
 |---|---|
@@ -276,156 +275,88 @@ Zeilen: Aberration (ψ → ψ', Verschiebung, Himmelsanteil des Kegels in `S` un
 Terrell-Drehung (ψ' → ψ, Drehwinkel, Verkürzung) und Doppler-Effekt (ψ', λ, T →
 D, λ', Bereich von λ', T', Farbe bei T').
 
-## Belichtung während der Beschleunigung (Filmvergleich)
+## Standbild mit Bewegungsunschärfe (3D-Flug)
 
-*Ergänzt am 03.11.2026 nach dem Auftrag „Belichtung während der Beschleunigung
-in der Simulation“.*
+*Ergänzt am 03./04.11.2026.*
 
-Ein Filmbild entsteht mit endlicher Belichtungszeit. Ändert sich β während der
-Belichtung, wandert jeder Stern auf dem Bild. Die Simulation rechnet genau das
-nach. Streifen entstehen **ausschließlich** aus dieser Rechnung: Es gibt keinen
-künstlichen Streifeneffekt, keine Überlichtphase und keine gekrümmte Raumzeit.
+Eine echte Kamera belichtet jedes Bild eine endliche Zeit lang. Ändert sich
+währenddessen β oder der Ort des Schiffs, wandern die Sterne im Bild und
+hinterlassen Streifen. Der Knopf **„Standbild mit Bewegungsunschärfe (PNG)“**
+im Abschnitt „Standbild“ rechnet das für den 3D-Flug nach. Streifen entstehen
+**ausschließlich** aus dieser Rechnung: Es gibt keinen künstlichen
+Streifeneffekt, keine Überlichtphase und keine gekrümmte Raumzeit.
 
-### Rechnung (`exposeStar` in `src/physics.js`)
+**Einstellungen:**
+- **Verschlusszeit t_b:** Vorgabe 1/48 s (24 Bilder/s, 180°-Umlaufverschluss).
+  Sie gilt an Bord, also in der Eigenzeit der Kamera.
+- **Beschleunigung während der Aufnahme**, angegeben als Δv in Δt: Vorgabe
+  Δv = 0,99 c in Δt = 3 s (00:56:54 → 00:56:57 der Filmszene). Daraus folgt
+  `a = c·artanh(Δv/c)/Δt = 2,645·10⁸ m/s² ≈ 2,70·10⁷ g`.
+- Die **Belichtung endet im aktuellen Moment** beim aktuellen β (Regler).
+  Vorher wurde mit a beschleunigt, aber nicht unter β = 0 (davor in Ruhe):
+  `β(τ) = tanh(max(0, artanh β_E + aτ/c))` für `−t_b ≤ τ ≤ 0`.
+- Bei Δv = 0 bleibt die Geschwindigkeit konstant. Dann bewegen sich Lichtjahre
+  entfernte Sterne in 1/48 s praktisch nicht, das Bild gleicht dem normalen
+  Standbild.
 
-1. **Intervall:** Bordzeit `[τ_m − t_b/2, τ_m + t_b/2]`. τ ist die Eigenzeit der
-   Kamera an Bord, `τ = 0` beim Beginn der Beschleunigung. β(τ) kommt aus der
-   gewählten Kurve der Beschleunigungsphase (`accelerationProfileProperTime`).
-   Die Kurven selbst sind in der Zeit t in S angegeben, umgerechnet wird mit
-   `τ = ∫ dt/γ`. Vor dem Beginn gilt β₀, nach dem Ende bleibt β₁.
-2. **Teilschritte:** Das Intervall wird so lange halbiert, bis der Bildpunkt je
-   Teilschritt höchstens 1 px wandert und sich die Helligkeit um höchstens 1 %
-   ändert.
-3. **Je Teilschritt:** das momentane β in der Mitte des Schritts, daraus die
-   Lage (`cos ψ' = (cos ψ + β)/(1 + β cos ψ)`, `φ' = φ`), `D = 1/(γ(1 + β cos ψ))`
-   (Ruhewinkel-Form, mit ψ in S) und die Helligkeit (`starFluxFactor`, wie im
-   Shader: nur sichtbar `D²·Y(T')/Y(T)`, gesamtes Spektrum `D⁻²·k(T)`).
-   Die Farbe ist die des Schwarzkörpers bei `T' = T/D`.
-4. **Lichtmenge:** `w = Helligkeit · Δτ / t_b`, linear aufsummiert. Das ist der
-   zeitliche Mittelwert über die Belichtung: t_b ändert die Länge der Streifen,
-   nicht die Helligkeit eines ruhenden Sterns. Bei `t_b = 0` gibt es genau einen
-   Schritt, also das bisherige Einzelbild.
-5. **Danach** (`src/exposure.js`): Objektiv, Tonkurve, sRGB.
+**Rechnung** (`physics.js`, Abschnitt 8):
 
-Die Kamera steht still. Ihre Achse zeigt in Flugrichtung, bewegt wird nur durch β(τ).
-Weil `φ' = φ` ist, läuft jeder Bildpunkt auf einer Geraden durch den Fluchtpunkt.
+1. **Belichtungsplan** (`motionBlurSchedule`): Die Belichtung `[−t_b, 0]` wird in
+   n gleich lange Teilbilder zerlegt. Jedes wird in seiner Mitte ausgewertet:
+   - β(τ) nach der Formel oben;
+   - Ort des Schiffs in S, mit `dz = β·γ·c·dτ`, geschlossen
+     `z(τ) − z(0) = −(c²/a)·(cosh η(0) − cosh η(τ))` (`motionBlurOffsetLy`);
+   - Gewicht 1/n.
+2. **Zahl der Teilbilder** (`motionBlurStepCount`): so viele, dass ein Stern je
+   Teilbild höchstens 1 px wandert. Die Obergrenze der Wanderung setzt sich
+   aus zwei Teilen zusammen:
+   - Aberration `|dψ'/dτ| = (a/c)·sin ψ' ≤ a/c`;
+   - Parallaxe: Strecke / Abstand des nächsten Sterns oder Körpers, mal
+     `D_max = γ(1 + β)`.
 
-### Objektiv (einzeln abschaltbar)
+   Das Ergebnis wird mit der größten Bildskala in der Bildecke multipliziert.
+3. **Rendern** (`render.js`, `renderAccumulated`): Jedes Teilbild wird mit den
+   normalen Shadern gerendert, also mit Aberration, Doppler und Beaming für das
+   momentane β und den momentanen Ort. Die Teilbilder werden gewichtet in
+   einem 32-Bit-Gleitkommapuffer aufsummiert. **Erst danach** folgen die
+   Begrenzung auf 1 und die sRGB-Kennlinie.
 
-- **An:** Gauß-Punktbildfunktion `PSF(Δx, Δy) = exp(−(Δx² + Δy²)/(2σ²)) / N`
-  mit `σ = FWHM / (2·√(2 ln 2)) ≈ FWHM / 2,3548`. Vorgabe ist FWHM = 2 px, also
-  σ = 0,849 px. Ausgewertet wird in den Pixelmitten eines Fensters von ±⌈3σ⌉ px
-  um den Bildpunkt. N ist die Summe über das Fenster, das Gesamtlicht bleibt
-  also erhalten. Licht, das über den Bildrand fällt, ist verloren.
-- **Aus:** keine Zusatzeffekte. Das Licht eines Teilschritts landet vollständig
-  in dem Pixel, in das der Bildpunkt fällt (ideale Lochkamera, idealer Sensor).
+Ein ruhender Stern ist so hell wie im normalen Standbild. Ein bewegter
+verteilt dasselbe Licht auf seinen Streifen und wird dadurch dunkler.
 
-Die Werte stehen auch im Debug-Panel und in den Metadaten jedes Exports.
+Bildausschnitt, Blickrichtung, Sichtfeld, Projektion und Auflösung entsprechen
+der Ansicht. Cockpit-Overlay und Beschriftung kommen wie beim normalen Standbild
+dazu. Alle Werte stehen im Debug-Panel: Verschlusszeit, a, β bei
+Verschlussöffnung und am Ende, Zahl der Teilbilder.
 
-### Tonkurve
+**Was man erwarten kann:** Bei konstanter Eigenbeschleunigung gilt
+`dψ'/dτ = −(a/c)·sin ψ'`, unabhängig von β. Mit der Vorgabe wandert ein Stern
+in 1/48 s also höchstens um 1,05°·sin ψ'. Bei β = 0,99 drängt die Aberration
+die meisten Sterne nahe an den Fluchtpunkt. Dort ist sin ψ' klein, die
+Streifen sind kurz. Bei kleinerem β oder weitem Sichtfeld werden sie deutlich
+länger.
 
-`v = min(1, s·E)` je Kanal, danach die sRGB-Kennlinie (IEC 61966-2-1), 8 Bit.
-E ist das aufsummierte Licht je Pixel in linearem sRGB, gemessen in der Einheit
-„Stern von 0 mag“. Für die Skalierung gilt `s = k / Spitzenanteil der PSF`.
-Mit dem Belichtungsfaktor `k = 1` erreicht ein Stern von 0 mag bei β = 0 im
-hellsten Pixel gerade Weiß, wenn sein Bildpunkt in einer Pixelmitte liegt.
-Der Spitzenanteil beträgt 0,2206 bei FWHM = 2 px und 1 ohne Objektiv.
-Alle Bilder eines Exports verwenden dieselbe Skalierung.
+**Im Browser geprüft:**
+- Mit t_b = 0 stimmt das Bild mit dem normalen Standbild bis auf Rundung
+  überein: höchstens 1/255 in 0,01 % der Pixel.
+- Schwerpunkt der Streifen von 20 isolierten hellen Sternen gegen die
+  Vorhersage aus `physics.js`: im Median 0,73 px Abweichung.
 
-### Vorgaben
-
-- **Filmszene** (Knopf „Vorgabe Filmszene“): β = 0 bei 00:56:54 bis β = 0,99
-  bei 00:56:57 mit konstanter Eigenbeschleunigung, `β = tanh(aτ/c)`.
-  Daraus folgen `a = c·artanh(0,99)/3 s = 2,645·10⁸ m/s²`, `a/c = 0,8822 s⁻¹`
-  und eine Dauer von 7,955 s in S.
-- **Belichtung:** `t_b = 1/48 s` (24 Bilder/s, 180°-Umlaufverschluss). Die
-  Vorgabe für die Bildmitte liegt kurz vor dem Ende: Die Belichtung endet genau
-  mit der Beschleunigung, 00:56:56.990.
-- **Kamera:** 2272 × 951 px, 60° horizontal, geradlinig, Fluchtpunkt (1114, 464) px
-  wie im Auswertungsprogramm gemessen. Für die Brennweite gilt
-  `f = 1136 px / tan 30° = 1967,6 px`. Wie in `szene_analysieren.py` liegt der
-  Hauptpunkt im Fluchtpunkt (Kameraachse in Flugrichtung).
-- **Sterndichte:** 9096 Sterne von −1 bis 6,5 mag am ganzen Himmel
-  (724 je Steradiant), fester Startwert 20261110. Wählbar sind ¼, ½, 1, 2 und 4
-  dieser Dichte.
-
-### Exporte (je ein ZIP)
-
-- **Bildpaar (a)/(b):** Bild (a) bei β = 0, Bild (b) zur gewählten Bildmitte.
-  Beide haben dieselbe Kamera, Belichtung, Tonkurve und dasselbe Sternenfeld.
-  `LIESMICH.txt` enthält den passenden Aufruf von `szene_analysieren.py`.
-- **Sequenz:** 4 bis 48 Bilder (Vorgabe 6), gleichmäßig über die
-  Beschleunigungsphase verteilt, alle Belichtungen innerhalb der Phase.
-- **Aktuelles Bild.**
-- Zu jedem Bild gehören:
-  - die PNG-Datei, 2272 × 951, ohne Statuszeile und ohne Bedienelemente,
-    wahlweise mit Cockpit-Overlay;
-  - eine JSON-Datei mit allen Parametern: β-Verlauf mit Stützstellen über die
-    Belichtung, t_b, Kamera, Tonkurve, Objektiv, Startwert, Effekt-Schalter,
-    Teilschritte;
-  - eine CSV-Datei (Trennzeichen `;`) mit einer Zeile je Stern im Bild: Ruhewinkel
-    ψ und φ, ψ' bei Beginn und Ende der Belichtung, Bildpunkte bei Beginn und
-    Ende, Streifenlänge in px (Abstand Anfang–Ende), D, Lichtmenge, Zahl der
-    Teilschritte.
-
-### Auswertung mit `szene_analysieren.py`
-
-Das Programm wird nicht verändert. Bei der Prüfung mit einem künstlichen
-Test-Cockpit (nicht das Filmbild) hat sich gezeigt:
-
-- Das Programm richtet Bild A über Merkmale des **Cockpits** auf Bild B aus
-  (SIFT, mindestens 10 Zuordnungen). **Ohne Cockpit-Overlay bricht es ab.** Mit
-  Cockpit ergab die Registrierung Maßstab 1,00000, Drehung 0,000° und
-  Verschiebung 0,0 px.
-- Ein Stern in Bild A muss **mindestens 2 px** Fläche haben. Ohne Objektiv ist
-  jeder Stern genau 1 px groß und wird deshalb nicht gefunden. Das Programm
-  bricht dann bei `psi_sterne.max()` ab. Für die Auswertung braucht es also
-  das Objektiv.
-- Die Himmelsmaske entsteht aus hellen, bläulichen Streifen in Bild B
-  (`L > 0,42`, `B − R > 0,02`). In der Simulation erfüllt das nur der dichte
-  Bereich um den Fluchtpunkt. Beim Test waren das 5,3 % der Bildfläche, ψ'
-  bis etwa 10°.
-- Den Fluchtpunkt schätzte das Programm auf (1137, 470) px. Der wahre Wert im
-  Simulationsbild ist (1114, 464) px.
-
-### Annahmen
-
-- Die Filmzeit ist Bordzeit: Die Kamera ist an Bord, die Belichtungszeit gilt
-  in ihrer Eigenzeit.
-- Sterne sind Punktquellen mit Schwarzkörperspektrum, wie im Rest der
-  Simulation.
-- Die Kamera ist ideal: Es gibt kein Rauschen, keine Sättigung außer der harten
-  Grenze der Tonkurve und keinen Bewegungsunschärfe-Effekt außer der Rechnung
-  selbst.
-- Die Helligkeit wird über t_b gemittelt (siehe oben). Für den Vergleich zweier
-  Bilder mit gleicher t_b spielt das keine Rolle.
-- Die Lichtlaufzeit innerhalb des Bildes wird nicht betrachtet: Die Sterne sind
-  unendlich weit entfernt (Himmelskugel), es zählt nur die Richtung.
-  Würfel, Kugel und 3D-Modus sind im belichteten Bild nicht enthalten.
-
-### Tests (`tests/exposure.test.js`)
-
-- `t_b = 0` liefert exakt das bisherige Einzelbild. Lage und Lichtmenge sind
-  bitgleich mit den Einzelformeln.
-- β = 0 und β konstant (auch nach dem Ende der Filmszene) liefern Punkte,
-  keine Streifen.
-- Bei β = 0,99 und Δβ = 0,002 wandert ein Stern bei ψ' = 10° zum Fluchtpunkt
-  hin, und zwar um 1,056°. Die erste Näherung `γ²·sin ψ'·Δβ` ergibt 1,000°.
-  Das Ergebnis stimmt mit der numerischen Lösung von `dψ'/dβ = −γ² sin ψ'`
-  (Runge-Kutta) auf 10⁻⁹ rad überein.
-- Für alle 9096 Sterne gilt zu drei Zeitpunkten der Filmszene: ψ' am Ende < ψ'
-  am Beginn.
-- Die Streifenlänge wächst bei festem Δβ mit sin ψ': Winkellänge / sin ψ' = γ²·Δβ
-  auf 0,1 %, die Länge in px wächst monoton.
-- Grenzfall β → 0: Das Sternenfeld bleibt unverändert (< 10⁻⁶ px). Der nach der
-  Formel für ψ' berechnete Sehwinkel stimmt mit dem im Bild gemessenen
-  Schwerpunkt auf 1 px überein, geprüft bei β = 0, 0,5, 0,9 und 0,99, mit und
-  ohne Objektiv.
-- Das Gesamtlicht bleibt beim Aufteilen in 20-mal feinere Teilschritte gleich
-  (Toleranz 1 %).
-- Der Bildpunkt wandert je Teilschritt höchstens 1 px. Das Objektiv erhält das
-  Licht. Ohne Objektiv gibt es nur Licht in den Pixeln der Bildpunkte. Die
-  Tonkurve bildet einen 0-mag-Stern bei k = 1 auf Weiß ab.
+**Tests** (`tests/motionblur.test.js`):
+- `a = c·artanh(Δv/c)/Δt`, und `tanh(aτ/c)` ist dieselbe Bewegung wie β(t) in S.
+- Die Belichtung endet beim aktuellen β, davor nie unter 0.
+- Die Strecke in S stimmt mit `∫ β·γ·c dτ` überein (numerisch).
+- `t_b = 0` ergibt genau ein Teilbild mit aktuellem β und ohne Versatz, also
+  das normale Standbild. Die Gewichte ergeben zusammen 1.
+- β = 0 und β konstant ergeben Punkte.
+- β = 0,99, Δβ = 0,002: Ein Stern bei ψ' = 10° wandert 1,056° zum Fluchtpunkt
+  hin, die Näherung `γ²·sin ψ'·Δβ` ergibt 1,000°. Mit der RK4-Lösung von
+  `dψ'/dβ = −γ² sin ψ'` stimmt das auf 10⁻⁹ rad überein.
+- Für alle 9096 Sterne gilt im letzten Teilbild ψ' < ψ' im ersten.
+- Die Streifenlänge wächst mit sin ψ', exakt `ln tan(ψ'/2)` sinkt um `(a/c)·Δτ`.
+- Kein Stern wandert je Teilbild mehr als 1 px.
+- Das Gesamtlicht bleibt bei 20-mal mehr Teilbildern gleich (1 %).
+- Bei β → 0 bleibt das Sternfeld unverändert.
 
 ## Cockpit-Bild
 
@@ -514,15 +445,12 @@ src/
   overview.js       Reiter „Übersicht“: Diagramme und Tabellen
   overlay.js        Cockpit-Bild, Standbild-Export
   showcase.js       Showcase-Poster (4K) mit markierten Sternen und Faktenkarten
-  exposure.js       belichtetes Bild (Filmvergleich): Objektiv, Tonkurve, CSV, JSON
-  exposureView.js   Abschnitt „Belichtung (Filmvergleich)“, Anzeige und Exporte
-  zip.js            ZIP-Archiv ohne Kompression für die Exporte
   style.css
 tests/
   physics.test.js   Vitest
   blackbody.test.js Vitest
   stars3d.test.js   Vitest
-  exposure.test.js  Vitest (Belichtung während der Beschleunigung)
+  motionblur.test.js Vitest (Standbild mit Bewegungsunschärfe)
 assets/
   cockpit.png       liefert der Auftraggeber (nicht im Repository)
 ```
@@ -550,7 +478,6 @@ Literaturverzeichnis der Arbeit (bitte damit abgleichen).
 - CIE-1931-Normspektralwertfunktionen: Datensatz „CIE 1931 2 Degree Standard
   Observer“ aus colour-science 0.4.7 (nach CVRL, University College London).
 - IEC 61966-2-1 (sRGB): Umrechnungsmatrix XYZ → sRGB und sRGB-Kennlinie.
-- PKWARE APPNOTE.TXT (ZIP-Dateiformat), für den Export.
-- Belichtung: Hyperbelbewegung (Rapidität linear in der Eigenzeit) und
+- Bewegungsunschärfe: Hyperbelbewegung (Rapidität linear in der Eigenzeit) und
   `dψ'/dβ = −γ² sin ψ'` sind im Code aus den Formeln von Kapitel 3 hergeleitet;
   Literaturstellen mit Seite sind noch zu ergänzen.
