@@ -45,6 +45,20 @@ export function clampBeta(beta) {
 const $ = (id) => document.getElementById(id);
 const parse = (el) => Number(String(el.value).replace(',', '.'));
 
+/** Zeit als Bruch ("1/48") oder Dezimalzahl in s → Sekunden (NaN bei Unsinn). */
+export function parseFraction(text) {
+  const t = String(text).trim().replace(',', '.').replace(/\s*s$/, '');
+  const m = t.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if (m) return Number(m[1]) / Number(m[2]);
+  return t === '' ? NaN : Number(t);
+}
+
+/** Sekunden → "1/48", wenn es ein Stammbruch ist, sonst Dezimalzahl. */
+export function fractionText(t) {
+  const inv = 1 / t;
+  return t > 0 && Math.abs(inv - Math.round(inv)) < 1e-9 ? `1/${Math.round(inv)}` : String(t);
+}
+
 /* ------------------------------------------------------------------------- */
 /* Beschleunigungsphase: Dauer ↔ Eigenbeschleunigung                         */
 /* ------------------------------------------------------------------------- */
@@ -244,6 +258,7 @@ export function createUI(state, cb) {
     $('mode3d-panel').classList.toggle('hidden', !v);
     $('place3d-row').hidden = !v;
     $('flyby').disabled = v;
+    $('blur-png').disabled = !v;
     cb.onMode3d(v);
     refreshAccel(null);
   });
@@ -304,6 +319,39 @@ export function createUI(state, cb) {
     }
   });
 
+  // ---- Standbild mit Bewegungsunschärfe (3D-Flug) ----
+  const blur = state.blur;
+  $('blur-tb').addEventListener('change', (e) => {
+    const v = parseFraction(e.target.value);
+    if (v >= 0 && v <= 10) blur.tb = v;
+    e.target.value = fractionText(blur.tb);
+  });
+  $('blur-dv').addEventListener('change', (e) => {
+    const v = parse(e.target);
+    if (v >= 0 && v < 1) blur.dv = v;
+    e.target.value = String(blur.dv);
+  });
+  $('blur-dt').addEventListener('change', (e) => {
+    const v = parse(e.target);
+    if (v > 0) blur.dt = v;
+    e.target.value = String(blur.dt);
+  });
+  $('blur-film').addEventListener('change', (e) => (blur.filmFormat = e.target.checked));
+  $('blur-png').disabled = !state.flight.enabled;
+  $('blur-png').addEventListener('click', async () => {
+    $('blur-status').textContent = 'Rechne Teilbilder …';
+    $('blur-png').disabled = true;
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      $('blur-status').textContent = await cb.onBlurExport($('export-caption').checked);
+    } catch (e) {
+      $('blur-status').textContent = `Fehler: ${e.message}`;
+    } finally {
+      $('blur-film').addEventListener('change', (e) => (blur.filmFormat = e.target.checked));
+  $('blur-png').disabled = !state.flight.enabled;
+    }
+  });
+
   $('showcase-btn').addEventListener('click', async () => {
     $('showcase-status').textContent = 'Berechne Showcase-Bild …';
     $('showcase-btn').disabled = true;
@@ -361,6 +409,9 @@ export function createUI(state, cb) {
   return {
     setBeta,
     refreshAccel,
+    setBlurInfo(text) {
+      if ($('blur-info').textContent !== text) $('blur-info').textContent = text;
+    },
     setAccelInfo(text) {
       for (const el of accelEls) {
         const p = el.querySelector('[data-k=info]');

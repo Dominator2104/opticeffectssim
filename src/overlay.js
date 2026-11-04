@@ -54,7 +54,7 @@ function tryLoad(img, url) {
  */
 export function createCockpitOverlay(img) {
   let visible = false;
-  let opacity = 0.9;
+  let opacity = 1;
   let status = 'Suche assets/cockpit.png …';
   let objectUrl = null;
 

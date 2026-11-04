@@ -427,6 +427,16 @@ function createStarField3D(sharedUniforms) {
       }
       return created + removed; // Anzahl geänderter Zellen (> 0: neu zeichnen)
     },
+    /** Nur den Beobachterort setzen (ohne Zellen zu laden), z. B. für Teilbilder einer Belichtung. */
+    setObserver(observer) {
+      for (const c of cells.values()) {
+        c.points.material.uniforms.uCellOffset.value.set(
+          c.origin[0] - observer[0],
+          c.origin[1] - observer[1],
+          c.origin[2] - observer[2],
+        );
+      }
+    },
     clear() {
       for (const key of [...cells.keys()]) dispose(key);
     },
@@ -676,6 +686,22 @@ void main() {
 `;
 
 /**
+ * Bewegungsunschärfe: Teilbild gewichtet zur bisherigen Summe addieren
+ * (lineares Licht, 32-Bit-Gleitkomma, Ping-Pong zwischen zwei Puffern).
+ */
+const ACCUMULATE_FRAGMENT = /* glsl */ `
+precision highp float;
+uniform sampler2D uSum;
+uniform sampler2D uFrame;
+uniform float uWeight;
+in vec2 vUv;
+out vec4 fragColor;
+void main() {
+  fragColor = vec4(texture(uSum, vUv).rgb + uWeight * texture(uFrame, vUv).rgb, 1.0);
+}
+`;
+
+/**
  * Schwarzkörper-Tabelle aus blackbody.js als 1D-Textur (1024 × 1 Texel).
  * Halbgenaue Gleitkommazahlen sind in WebGL 2 immer linear filterbar. Damit
  * die Genauigkeit reicht, wird log10 Y relativ zu Y(5800 K) gespeichert.
@@ -824,6 +850,12 @@ export function createRenderer(canvas) {
    *                    fovDeg (vertikales Sichtfeld), exposure, yaw, pitch
    */
   function render(s) {
+    renderToTarget(s);
+    renderer.render(outputScene, camera);
+  }
+
+  /** Szene linear in den Zwischenpuffer target rendern (Schritt 1 des Ablaufs). */
+  function renderToTarget(s) {
     uniforms.uBeta.value = s.beta;
     uniforms.uGamma.value = s.gamma;
     uniforms.uAberration.value = s.aberration;
@@ -857,7 +889,77 @@ export function createRenderer(canvas) {
     renderer.clear();
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
+  }
+
+  /**
+   * Standbild mit Bewegungsunschärfe: count Teilbilder (frameAt(i) liefert
+   * Zustand und Gewicht; der Aufrufer stellt dort auch den Beobachterort ein)
+   * werden einzeln linear gerendert und gewichtet aufsummiert. Erst die Summe
+   * geht durch die Ausgabe (Begrenzung auf 1 und sRGB-Kennlinie).
+   * Auflösung wie am Bildschirm oder fest (size, z. B. Filmformat); bei fester
+   * Auflösung werden die Punktgrößen wie bei renderOffscreen auf die Bildhöhe
+   * skaliert. Rückgabe: Kopie als 2D-Canvas.
+   *
+   * @param {number} count
+   * @param {(i:number)=>{state:object, weight:number}} frameAt
+   * @param {{width:number, height:number}} [size]
+   */
+  function renderAccumulated(count, frameAt, size) {
+    const savedPr = renderer.getPixelRatio();
+    if (size) {
+      renderer.setPixelRatio(1);
+      renderer.setSize(size.width, size.height, false);
+      target.setSize(size.width, size.height);
+      uniforms.uAspect.value = size.width / size.height;
+      uniforms.uPixelRatio.value = Math.max(1, size.height / Math.max(1, canvas.clientHeight));
+    }
+    const w = target.width;
+    const h = target.height;
+    const float = renderer.extensions.has('EXT_color_buffer_float');
+    const opts = { type: float ? THREE.FloatType : THREE.HalfFloatType, depthBuffer: false };
+    let sum = new THREE.WebGLRenderTarget(w, h, opts);
+    let next = new THREE.WebGLRenderTarget(w, h, opts);
+    const accMaterial = new THREE.ShaderMaterial({
+      glslVersion: THREE.GLSL3,
+      vertexShader: OUTPUT_VERTEX,
+      fragmentShader: ACCUMULATE_FRAGMENT,
+      uniforms: { uSum: { value: null }, uFrame: { value: target.texture }, uWeight: { value: 0 } },
+      depthTest: false,
+      depthWrite: false,
+    });
+    const accScene = new THREE.Scene();
+    const accQuad = new THREE.Mesh(quad.geometry, accMaterial);
+    accQuad.frustumCulled = false;
+    accScene.add(accQuad);
+
+    renderer.setClearColor(0x000000, 1);
+    renderer.setRenderTarget(sum);
+    renderer.clear();
+    for (let i = 0; i < count; i++) {
+      const { state, weight } = frameAt(i);
+      renderToTarget(state);
+      accMaterial.uniforms.uSum.value = sum.texture;
+      accMaterial.uniforms.uWeight.value = weight;
+      renderer.setRenderTarget(next);
+      renderer.render(accScene, camera);
+      [sum, next] = [next, sum];
+    }
+    renderer.setRenderTarget(null);
+    outputMaterial.uniforms.uImage.value = sum.texture;
     renderer.render(outputScene, camera);
+    const out = document.createElement('canvas');
+    out.width = renderer.domElement.width;
+    out.height = renderer.domElement.height;
+    out.getContext('2d').drawImage(renderer.domElement, 0, 0);
+    outputMaterial.uniforms.uImage.value = target.texture;
+    sum.dispose();
+    next.dispose();
+    accMaterial.dispose();
+    if (size) {
+      renderer.setPixelRatio(savedPr);
+      resize();
+    }
+    return { canvas: out, precision: float ? '32 Bit' : '16 Bit' };
   }
 
   /**
@@ -934,5 +1036,5 @@ export function createRenderer(canvas) {
     return out;
   }
 
-  return { renderer, setStars, resize, render, measureSphereRoundness, renderOffscreen, field3d };
+  return { renderer, setStars, resize, render, renderAccumulated, measureSphereRoundness, renderOffscreen, field3d };
 }
