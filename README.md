@@ -326,7 +326,15 @@ verteilt dasselbe Licht auf seinen Streifen und wird dadurch dunkler.
 
 Bildausschnitt, Blickrichtung, Sichtfeld, Projektion und Auflösung entsprechen
 der Ansicht. Cockpit-Overlay und Beschriftung kommen wie beim normalen Standbild
-dazu. Alle Werte stehen im Debug-Panel: Verschlusszeit, a, β bei
+dazu.
+
+**Option „Bildformat des Films“:** Das Bild hat dann 2272 × 951 Pixel
+(2,39 : 1), wie die ausgewerteten Filmbilder. Blickrichtung, Projektion und
+vertikales Sichtfeld bleiben wie in der Ansicht. Das waagrechte Sichtfeld folgt
+aus dem Seitenverhältnis, bei 60° vertikal und Perspektive sind das 108°.
+Die Punktgrößen werden wie beim Showcase-Bild auf die Bildhöhe skaliert.
+Das freigestellte Cockpit hat fast dasselbe Seitenverhältnis (2000 × 839) und
+füllt das Bild deshalb nahezu ohne Beschnitt. Alle Werte stehen im Debug-Panel: Verschlusszeit, a, β bei
 Verschlussöffnung und am Ende, Zahl der Teilbilder.
 
 **Was man erwarten kann:** Bei konstanter Eigenbeschleunigung gilt
@@ -368,6 +376,23 @@ Projektordner neben `dist/`. Fehlt sie, erscheint ein Platzhalter. Mit
 „Bild wählen…“ lässt sich das Bild auch direkt auswählen; nur so kann der
 Browser es beim Öffnen per Doppelklick auch ins gespeicherte Standbild
 übernehmen (Sicherheitsregel für Dateien von `file://`).
+
+**Freigestellt (04.11.2026):** Das Standard-Overlay ist ein PNG mit
+Transparenz. Cockpit, Streben, Bögen und die Köpfe sind undurchsichtig, die
+Fensterflächen sind durchsichtig. Dort erscheint der simulierte Himmel statt
+der Sterne des Films. Die Kante ist auf etwa 1 Pixel weichgezeichnet.
+Die Vorgabe für die Deckkraft ist deshalb 100 %; vorher waren es 90 %,
+damit der Himmel durch ein undurchsichtiges Bild schien.
+
+So wurde freigestellt:
+- Himmel ist, was nach dem Entfernen der Sterne (morphologisches Öffnen) sehr
+  dunkel und glatt ist.
+- Er muss außerdem in einer zusammenhängenden Fläche mit Sternen liegen. So
+  bleiben die schwarzen Cockpitecken außerhalb des Fensterrahmens erhalten.
+- Die Kanten an Haaren und Streben hat danach GrabCut (OpenCV) verfeinert.
+
+Kleine Ungenauigkeiten bleiben an den sehr dunklen Schattenseiten einzelner
+Streben.
 
 ## Darstellungsentscheidungen (keine Physik)
 

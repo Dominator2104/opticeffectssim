@@ -896,12 +896,23 @@ export function createRenderer(canvas) {
    * Zustand und Gewicht; der Aufrufer stellt dort auch den Beobachterort ein)
    * werden einzeln linear gerendert und gewichtet aufsummiert. Erst die Summe
    * geht durch die Ausgabe (Begrenzung auf 1 und sRGB-Kennlinie).
-   * Auflösung wie am Bildschirm. Rückgabe: Kopie als 2D-Canvas.
+   * Auflösung wie am Bildschirm oder fest (size, z. B. Filmformat); bei fester
+   * Auflösung werden die Punktgrößen wie bei renderOffscreen auf die Bildhöhe
+   * skaliert. Rückgabe: Kopie als 2D-Canvas.
    *
    * @param {number} count
    * @param {(i:number)=>{state:object, weight:number}} frameAt
+   * @param {{width:number, height:number}} [size]
    */
-  function renderAccumulated(count, frameAt) {
+  function renderAccumulated(count, frameAt, size) {
+    const savedPr = renderer.getPixelRatio();
+    if (size) {
+      renderer.setPixelRatio(1);
+      renderer.setSize(size.width, size.height, false);
+      target.setSize(size.width, size.height);
+      uniforms.uAspect.value = size.width / size.height;
+      uniforms.uPixelRatio.value = Math.max(1, size.height / Math.max(1, canvas.clientHeight));
+    }
     const w = target.width;
     const h = target.height;
     const float = renderer.extensions.has('EXT_color_buffer_float');
@@ -944,6 +955,10 @@ export function createRenderer(canvas) {
     sum.dispose();
     next.dispose();
     accMaterial.dispose();
+    if (size) {
+      renderer.setPixelRatio(savedPr);
+      resize();
+    }
     return { canvas: out, precision: float ? '32 Bit' : '16 Bit' };
   }
 

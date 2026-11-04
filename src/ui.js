@@ -336,6 +336,7 @@ export function createUI(state, cb) {
     if (v > 0) blur.dt = v;
     e.target.value = String(blur.dt);
   });
+  $('blur-film').addEventListener('change', (e) => (blur.filmFormat = e.target.checked));
   $('blur-png').disabled = !state.flight.enabled;
   $('blur-png').addEventListener('click', async () => {
     $('blur-status').textContent = 'Rechne Teilbilder …';
@@ -346,7 +347,8 @@ export function createUI(state, cb) {
     } catch (e) {
       $('blur-status').textContent = `Fehler: ${e.message}`;
     } finally {
-      $('blur-png').disabled = !state.flight.enabled;
+      $('blur-film').addEventListener('change', (e) => (blur.filmFormat = e.target.checked));
+  $('blur-png').disabled = !state.flight.enabled;
     }
   });
 
