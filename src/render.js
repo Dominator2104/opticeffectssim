@@ -20,6 +20,7 @@
 import * as THREE from 'three';
 import { createCubeGeometry, createSphereGeometry, createCubeEdges, BODY_TEMPERATURE } from './bodies.js';
 import { buildBlackbodyTable, buildFalseColorTable, visibleLuminance, TABLE_SIZE, TABLE_T_MIN, TABLE_T_MAX } from './blackbody.js';
+import { gaussianKernel } from './optics.js';
 
 /* ------------------------------------------------------------------------- */
 /* Gemeinsamer Shader-Code                                                   */
@@ -198,6 +199,8 @@ uniform float uBaseSize;   // Punktgröße eines gerade sichtbaren Sterns in Pix
 uniform float uMaxSize;    // größte Punktgröße in Pixeln (Bildschirm ist nicht beliebig hell)
 uniform float uMarkSize;   // Größe der UV/IR-Markierung in Pixeln
 uniform float uPixelRatio;
+uniform int uStarModel;    // 0 = Bildschirm-Modell (Fleck wächst), 1 = Kamera-Modell (Punkt + Objektiv)
+uniform float uCameraGain; // Kamera-Modell: 1 / Spitzenanteil des Objektivs (optics.lensPeak)
 
 out vec3 vColor;
 out float vIntensity;
@@ -232,6 +235,21 @@ void starAppearance(vec3 n, float baseFlux, float T) {
   // egal welche Farbe sie haben.
   float colorLuminance = max(dot(vColor, vec3(0.2126, 0.7152, 0.0722)), 1.0e-3);
   float e = flux * uExposure / colorLuminance;
+
+  // Kamera-Modell (Physik der Abbildung): Der Stern ist ein Punkt, sein
+  // ganzes Licht wird ohne Verlust auf die 2 × 2 Pixel um den Bildpunkt
+  // verteilt (Zeltfunktion im Fragment-Shader); die Größe des Lichtflecks
+  // entsteht erst durch das Objektiv und die Sättigung der Tonkurve.
+  // Begrenzung nur, damit Halbgenauigkeit nicht überläuft (weit über Weiß).
+  if (uStarModel == 1) {
+    vIntensity = min(e * uCameraGain, 3.0e4);
+    vCoreFraction = 1.0;
+    vMark = 0.0;
+    vSpritePx = 2.0;
+    gl_PointSize = 2.0;
+    return;
+  }
+
   float core = min(uBaseSize * sqrt(max(e, 1.0)), uMaxSize);
   vIntensity = min(e, 1.0);
 
@@ -303,6 +321,7 @@ void main() {
 
 const STAR_FRAGMENT = /* glsl */ `
 precision highp float;
+uniform int uStarModel;
 in vec3 vColor;
 in float vIntensity;
 in float vCoreFraction;
@@ -311,6 +330,14 @@ in float vSpritePx;
 out vec4 fragColor;
 void main() {
   vec2 p = gl_PointCoord * 2.0 - 1.0;   // −1 … 1 über den ganzen Punkt
+  if (uStarModel == 1) {
+    // Kamera-Modell: Punkt der Größe 2 Pixel, p = Abstand Pixelmitte − Bildpunkt
+    // in Pixeln; Zeltgewichte (1 − |dx|)(1 − |dy|) ergeben zusammen genau 1.
+    float w = max(0.0, 1.0 - abs(p.x)) * max(0.0, 1.0 - abs(p.y));
+    if (w <= 0.0) discard;
+    fragColor = vec4(vColor * vIntensity * w, 1.0);
+    return;
+  }
   vec3 col = vec3(0.0);
 
   // runder Lichtfleck mit gaußförmigem Abfall (Beugungsscheibchen einer Kamera)
@@ -673,6 +700,16 @@ void main() {
 const OUTPUT_FRAGMENT = /* glsl */ `
 precision highp float;
 uniform sampler2D uImage;
+uniform float uScale;          // 1 / Summe der Gewichte (Teilbilder)
+uniform bool uHalo;            // Streulicht (optics: zweite, breite Gaußfunktion)
+uniform sampler2D uHaloTex;
+uniform float uHaloFraction;
+uniform bool uVignette;        // optics.vignetteCos4
+uniform int uProjection;
+uniform float uFocal;
+uniform float uStereoScale;
+uniform float uAspect;
+uniform int uTone;             // optics.toneCurve: 0 = linear begrenzt, 1 = Film-Schulter
 in vec2 vUv;
 out vec4 fragColor;
 // sRGB-Kennlinie (IEC 61966-2-1)
@@ -681,7 +718,88 @@ vec3 linearToSrgb(vec3 c) {
   return mix(12.92 * c, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 void main() {
-  fragColor = vec4(linearToSrgb(texture(uImage, vUv).rgb), 1.0);
+  vec3 c = texture(uImage, vUv).rgb * uScale;
+  if (uHalo) c = (1.0 - uHaloFraction) * c + uHaloFraction * texture(uHaloTex, vUv).rgb;
+  if (uVignette) {
+    // Winkel α zur optischen Achse (Bildmitte) aus dem Bildpunkt
+    vec2 q = vUv * 2.0 - 1.0;
+    q.x *= uAspect;
+    float r = length(q);
+    float tanA;
+    if (uProjection == 0) {
+      tanA = r / uFocal;                         // r = f·tan α
+    } else {
+      float t = r / (2.0 * uStereoScale);        // stereografisch: r = 2·S·tan(α/2)
+      tanA = t < 1.0 ? 2.0 * t / (1.0 - t * t) : 1.0e6;
+    }
+    float c2 = 1.0 / (1.0 + tanA * tanA);
+    c *= c2 * c2;                                // cos⁴ α
+  }
+  c = uTone == 1 ? 1.0 - exp(-max(c, 0.0)) : clamp(c, 0.0, 1.0);
+  fragColor = vec4(linearToSrgb(c), 1.0);
+}
+`;
+
+/** Eindimensionale Gaußfaltung (optics.gaussianKernel), waagrecht oder senkrecht. */
+const GAUSS_FRAGMENT = /* glsl */ `
+precision highp float;
+uniform sampler2D uSrc;
+uniform vec2 uStep;            // ein Texel in Faltungsrichtung
+uniform float uScale;
+uniform float uW[65];          // Gewichte für Abstand 0 … 64
+uniform int uR;
+in vec2 vUv;
+out vec4 fragColor;
+void main() {
+  vec3 s = uW[0] * texture(uSrc, vUv).rgb;
+  for (int i = 1; i <= 64; i++) {
+    if (i > uR) break;
+    vec2 o = uStep * float(i);
+    s += uW[i] * (texture(uSrc, vUv + o).rgb + texture(uSrc, vUv - o).rgb);
+  }
+  fragColor = vec4(s * uScale, 1.0);
+}
+`;
+
+/** Zweidimensionale Faltung mit dem Airy-Kern (optics.airyKernel), je Farbkanal eigener Kern. */
+const AIRY_FRAGMENT = /* glsl */ `
+precision highp float;
+uniform sampler2D uSrc;
+uniform sampler2D uKernel;     // (2R+1)² Texel, RGB = Gewichte der drei Kanäle
+uniform vec2 uTexel;
+uniform float uScale;
+uniform int uR;
+in vec2 vUv;
+out vec4 fragColor;
+void main() {
+  vec3 s = vec3(0.0);
+  float size = float(2 * uR + 1);
+  for (int dy = -8; dy <= 8; dy++) {
+    if (dy < -uR || dy > uR) continue;
+    for (int dx = -8; dx <= 8; dx++) {
+      if (dx < -uR || dx > uR) continue;
+      vec3 w = texture(uKernel, (vec2(float(dx + uR), float(dy + uR)) + 0.5) / size).rgb;
+      s += w * texture(uSrc, vUv + vec2(float(dx), float(dy)) * uTexel).rgb;
+    }
+  }
+  fragColor = vec4(s * uScale, 1.0);
+}
+`;
+
+/** Verkleinern auf ein Viertel (Mittel über 4 × 4 Pixel) für das breite Streulicht. */
+const DOWNSAMPLE_FRAGMENT = /* glsl */ `
+precision highp float;
+uniform sampler2D uSrc;
+uniform vec2 uSrcTexel;
+uniform float uScale;
+in vec2 vUv;
+out vec4 fragColor;
+void main() {
+  vec3 s = vec3(0.0);
+  for (int j = 0; j < 4; j++)
+    for (int i = 0; i < 4; i++)
+      s += texture(uSrc, vUv + (vec2(float(i), float(j)) - 1.5) * uSrcTexel).rgb;
+  fragColor = vec4(s * (uScale / 16.0), 1.0);
 }
 `;
 
@@ -760,6 +878,29 @@ export function viewMatrix(yaw, pitch) {
   );
 }
 
+/** ShaderMaterial für einen Vollbild-Durchgang. */
+function passMaterial(fragmentShader, passUniforms) {
+  return new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    vertexShader: OUTPUT_VERTEX,
+    fragmentShader,
+    uniforms: passUniforms,
+    depthTest: false,
+    depthWrite: false,
+  });
+}
+
+/** optics.gaussianKernel in das Uniform-Feld schreiben; Rückgabe: Radius (höchstens 64). */
+function gaussianKernelUniform(sigma, out) {
+  const k = gaussianKernel(sigma);
+  const R = Math.min(64, k.length - 1);
+  out.fill(0);
+  let sum = k[0];
+  for (let i = 1; i <= R; i++) sum += 2 * k[i];
+  for (let i = 0; i <= R; i++) out[i] = k[i] / sum; // nach dem Abschneiden neu normieren
+  return R;
+}
+
 export function createRenderer(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -789,6 +930,8 @@ export function createRenderer(canvas) {
     uUniformTemperature: { value: false },
     uBodyTemperature: { value: BODY_TEMPERATURE },
     uRadiance: { value: 0.18 },
+    uStarModel: { value: 0 },
+    uCameraGain: { value: 1 },
   };
 
   const scene = new THREE.Scene();
@@ -801,13 +944,18 @@ export function createRenderer(canvas) {
     depthBuffer: true,
   });
   const outputScene = new THREE.Scene();
-  const outputMaterial = new THREE.ShaderMaterial({
-    glslVersion: THREE.GLSL3,
-    vertexShader: OUTPUT_VERTEX,
-    fragmentShader: OUTPUT_FRAGMENT,
-    uniforms: { uImage: { value: target.texture } },
-    depthTest: false,
-    depthWrite: false,
+  const outputMaterial = passMaterial(OUTPUT_FRAGMENT, {
+    uImage: { value: target.texture },
+    uScale: { value: 1 },
+    uHalo: { value: false },
+    uHaloTex: { value: null },
+    uHaloFraction: { value: 0 },
+    uVignette: { value: false },
+    uProjection: uniforms.uProjection,
+    uFocal: uniforms.uFocal,
+    uStereoScale: uniforms.uStereoScale,
+    uAspect: uniforms.uAspect,
+    uTone: { value: 0 },
   });
   const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), outputMaterial);
   quad.frustumCulled = false;
@@ -834,24 +982,199 @@ export function createRenderer(canvas) {
     scene.add(starPoints);
   }
 
+  // ---- Nachbearbeitung: Summe der Teilbilder, Objektiv, Ausgabe ----
+  // Summe in 32-Bit-Gleitkomma, wenn der Browser es kann (Lesen ohne Filter,
+  // immer genau in Texelmitten); Objektiv-Zwischenbilder in Halbgenauigkeit.
+  const floatOk = renderer.extensions.has('EXT_color_buffer_float');
+  const mk = (type, filter) => new THREE.WebGLRenderTarget(1, 1, { type, depthBuffer: false, minFilter: filter, magFilter: filter });
+  let sumA = mk(floatOk ? THREE.FloatType : THREE.HalfFloatType, THREE.NearestFilter);
+  let sumB = mk(floatOk ? THREE.FloatType : THREE.HalfFloatType, THREE.NearestFilter);
+  let lensA = mk(THREE.HalfFloatType, THREE.LinearFilter);
+  let lensB = mk(THREE.HalfFloatType, THREE.LinearFilter);
+  let haloA = mk(THREE.HalfFloatType, THREE.LinearFilter);
+  let haloB = mk(THREE.HalfFloatType, THREE.LinearFilter);
+  const accMaterial = passMaterial(ACCUMULATE_FRAGMENT, { uSum: { value: null }, uFrame: { value: target.texture }, uWeight: { value: 0 } });
+  const gaussMaterial = passMaterial(GAUSS_FRAGMENT, {
+    uSrc: { value: null }, uStep: { value: new THREE.Vector2() }, uScale: { value: 1 },
+    uW: { value: new Float32Array(65) }, uR: { value: 0 },
+  });
+  const airyMaterial = passMaterial(AIRY_FRAGMENT, {
+    uSrc: { value: null }, uKernel: { value: null }, uTexel: { value: new THREE.Vector2() }, uScale: { value: 1 }, uR: { value: 0 },
+  });
+  const downMaterial = passMaterial(DOWNSAMPLE_FRAGMENT, { uSrc: { value: null }, uSrcTexel: { value: new THREE.Vector2() }, uScale: { value: 1 } });
+  const passQuad = new THREE.Mesh(quad.geometry, outputMaterial);
+  passQuad.frustumCulled = false;
+  const passScene = new THREE.Scene();
+  passScene.add(passQuad);
+  function runPass(material, dest) {
+    passQuad.material = material;
+    renderer.setRenderTarget(dest);
+    renderer.render(passScene, camera);
+  }
+  let accWeight = 0;
+  let airyCache = { key: '', texture: null };
+
+  function setBufferSizes(w, h) {
+    target.setSize(w, h);
+    for (const t of [sumA, sumB, lensA, lensB]) t.setSize(w, h);
+    for (const t of [haloA, haloB]) t.setSize(Math.max(1, Math.ceil(w / 4)), Math.max(1, Math.ceil(h / 4)));
+    accWeight = 0;
+  }
+
+  let fixedSize = null; // feste Bildgröße für Exporte (sonst Bildschirm)
   function resize() {
+    if (fixedSize) return;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
     renderer.setSize(w, h, false);
     const pr = renderer.getPixelRatio();
-    target.setSize(Math.max(1, Math.floor(w * pr)), Math.max(1, Math.floor(h * pr)));
+    setBufferSizes(Math.max(1, Math.floor(w * pr)), Math.max(1, Math.floor(h * pr)));
     uniforms.uAspect.value = w / Math.max(1, h);
     uniforms.uPixelRatio.value = pr;
   }
 
   /**
+   * Feste Bildgröße für Exporte (width × height Pixel). Punktgrößen des
+   * Bildschirm-Modells werden auf die Bildhöhe skaliert, damit Sterne im
+   * Verhältnis so groß wirken wie am Bildschirm. Mit null zurück zur Ansicht.
+   */
+  let savedPr = 1;
+  function setRenderSize(size) {
+    if (size) {
+      if (!fixedSize) savedPr = renderer.getPixelRatio();
+      fixedSize = size;
+      renderer.setPixelRatio(1);
+      renderer.setSize(size.width, size.height, false);
+      setBufferSizes(size.width, size.height);
+      uniforms.uAspect.value = size.width / size.height;
+      uniforms.uPixelRatio.value = Math.max(1, size.height / Math.max(1, canvas.clientHeight));
+    } else if (fixedSize) {
+      fixedSize = null;
+      renderer.setPixelRatio(savedPr);
+      resize();
+    }
+  }
+
+  /** Größe des gerenderten Bildes in Pixeln. */
+  function imageSize() {
+    return { width: target.width, height: target.height };
+  }
+
+  /** Neue Summe beginnen (Bewegungsunschärfe). */
+  function beginAccumulation() {
+    renderer.setRenderTarget(sumA);
+    renderer.setClearColor(0x000000, 1);
+    renderer.clear();
+    renderer.setRenderTarget(null);
+    accWeight = 0;
+  }
+
+  /** Ein Teilbild rendern und mit seinem Gewicht zur Summe addieren. */
+  function accumulate(s, weight) {
+    renderToTarget(s);
+    accMaterial.uniforms.uSum.value = sumA.texture;
+    accMaterial.uniforms.uWeight.value = weight;
+    runPass(accMaterial, sumB);
+    [sumA, sumB] = [sumB, sumA];
+    accWeight += weight;
+    renderer.setRenderTarget(null);
+  }
+
+  function setGauss(src, dest, sigma, horizontal, scale, w, h) {
+    const k = gaussianKernelUniform(sigma, gaussMaterial.uniforms.uW.value);
+    gaussMaterial.uniforms.uSrc.value = src.texture;
+    gaussMaterial.uniforms.uR.value = k;
+    gaussMaterial.uniforms.uScale.value = scale;
+    gaussMaterial.uniforms.uStep.value.set(horizontal ? 1 / w : 0, horizontal ? 0 : 1 / h);
+    runPass(gaussMaterial, dest);
+  }
+
+  function airyTexture(airy) {
+    const key = `${airy.radius}|${airy.key}`;
+    if (airyCache.key !== key) {
+      airyCache.texture?.dispose();
+      const size = 2 * airy.radius + 1;
+      const data = new Float32Array(size * size * 4);
+      for (let i = 0; i < size * size; i++) {
+        data[4 * i] = airy.weights[0][i];
+        data[4 * i + 1] = airy.weights[1][i];
+        data[4 * i + 2] = airy.weights[2][i];
+        data[4 * i + 3] = 1;
+      }
+      const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat, THREE.FloatType);
+      tex.minFilter = THREE.NearestFilter;
+      tex.magFilter = THREE.NearestFilter;
+      tex.needsUpdate = true;
+      airyCache = { key, texture: tex };
+    }
+    return airyCache.texture;
+  }
+
+  /**
+   * Nachbearbeitung und Ausgabe auf die Zeichenfläche:
+   *   Summe (bzw. einzelnes Bild) / Summe der Gewichte → Airy → Gauß → Streulicht
+   *   → Randabdunklung → Tonkurve → sRGB.
+   * @param {object} post  { airy:{radius, weights:[R,G,B], key}|null, lens:{sigmaPx, haloFraction, haloSigmaPx}|null,
+   *                         vignette:boolean, tone:'linear'|'film' }
+   * @param {boolean} single  true: das zuletzt gerenderte Einzelbild (ohne Summe) ausgeben
+   */
+  function present(post = {}, single = false) {
+    const w = target.width;
+    const h = target.height;
+    let src = single ? target : sumA;
+    let scale = single ? 1 : 1 / Math.max(accWeight, 1e-12);
+    if (post.airy && post.airy.radius > 0) {
+      airyMaterial.uniforms.uSrc.value = src.texture;
+      airyMaterial.uniforms.uKernel.value = airyTexture(post.airy);
+      airyMaterial.uniforms.uR.value = post.airy.radius;
+      airyMaterial.uniforms.uTexel.value.set(1 / w, 1 / h);
+      airyMaterial.uniforms.uScale.value = scale;
+      runPass(airyMaterial, lensA);
+      src = lensA;
+      scale = 1;
+    }
+    const lens = post.lens;
+    let haloOn = false;
+    if (lens && lens.haloFraction > 0 && lens.haloSigmaPx > 0) {
+      // Streulicht aus dem Licht vor der Kernunschärfe, in Viertelauflösung
+      downMaterial.uniforms.uSrc.value = src.texture;
+      downMaterial.uniforms.uSrcTexel.value.set(1 / w, 1 / h);
+      downMaterial.uniforms.uScale.value = scale;
+      runPass(downMaterial, haloA);
+      const qs = lens.haloSigmaPx / 4;
+      setGauss(haloA, haloB, qs, true, 1, haloA.width, haloA.height);
+      setGauss(haloB, haloA, qs, false, 1, haloA.width, haloA.height);
+      haloOn = true;
+    }
+    if (lens && lens.sigmaPx > 0) {
+      const tmp = src === lensA ? lensB : lensA;
+      const out = tmp === lensA ? lensB : lensA;
+      setGauss(src, tmp, lens.sigmaPx, true, scale, w, h);
+      setGauss(tmp, out, lens.sigmaPx, false, 1, w, h);
+      src = out;
+      scale = 1;
+    }
+    const u = outputMaterial.uniforms;
+    u.uImage.value = src.texture;
+    u.uScale.value = scale;
+    u.uHalo.value = haloOn;
+    u.uHaloTex.value = haloA.texture;
+    u.uHaloFraction.value = haloOn ? lens.haloFraction : 0;
+    u.uVignette.value = !!post.vignette;
+    u.uTone.value = post.tone === 'film' ? 1 : 0;
+    runPass(outputMaterial, null);
+  }
+
+  /**
+   * Einzelbild ohne Teilbilder rendern und ausgeben.
    * @param {object} s  Zustand: beta, gamma, aberration, doppler, beaming, spectrum ('visible'|'full'),
    *                    projection ('perspective'|'stereographic'),
-   *                    fovDeg (vertikales Sichtfeld), exposure, yaw, pitch
+   *                    fovDeg (vertikales Sichtfeld), exposure, yaw, pitch, starModel, cameraGain
+   * @param {object} [post]  Nachbearbeitung (siehe present)
    */
-  function render(s) {
+  function render(s, post) {
     renderToTarget(s);
-    renderer.render(outputScene, camera);
+    present(post, true);
   }
 
   /** Szene linear in den Zwischenpuffer target rendern (Schritt 1 des Ablaufs). */
@@ -868,6 +1191,8 @@ export function createRenderer(canvas) {
     uniforms.uStereoScale.value = 1 / (2 * Math.tan(halfFov / 2));
     uniforms.uExposure.value = s.exposure;
     uniforms.uView.value = viewMatrix(s.yaw, s.pitch);
+    uniforms.uStarModel.value = s.starModel === 'camera' ? 1 : 0;
+    uniforms.uCameraGain.value = s.cameraGain ?? 1;
 
     // Mittelpunkte in S relativ zum Beobachter berechnet main.js (Platzierung, Vorbeiflug)
     const b = s.bodies;
@@ -889,77 +1214,6 @@ export function createRenderer(canvas) {
     renderer.clear();
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
-  }
-
-  /**
-   * Standbild mit Bewegungsunschärfe: count Teilbilder (frameAt(i) liefert
-   * Zustand und Gewicht; der Aufrufer stellt dort auch den Beobachterort ein)
-   * werden einzeln linear gerendert und gewichtet aufsummiert. Erst die Summe
-   * geht durch die Ausgabe (Begrenzung auf 1 und sRGB-Kennlinie).
-   * Auflösung wie am Bildschirm oder fest (size, z. B. Filmformat); bei fester
-   * Auflösung werden die Punktgrößen wie bei renderOffscreen auf die Bildhöhe
-   * skaliert. Rückgabe: Kopie als 2D-Canvas.
-   *
-   * @param {number} count
-   * @param {(i:number)=>{state:object, weight:number}} frameAt
-   * @param {{width:number, height:number}} [size]
-   */
-  function renderAccumulated(count, frameAt, size) {
-    const savedPr = renderer.getPixelRatio();
-    if (size) {
-      renderer.setPixelRatio(1);
-      renderer.setSize(size.width, size.height, false);
-      target.setSize(size.width, size.height);
-      uniforms.uAspect.value = size.width / size.height;
-      uniforms.uPixelRatio.value = Math.max(1, size.height / Math.max(1, canvas.clientHeight));
-    }
-    const w = target.width;
-    const h = target.height;
-    const float = renderer.extensions.has('EXT_color_buffer_float');
-    const opts = { type: float ? THREE.FloatType : THREE.HalfFloatType, depthBuffer: false };
-    let sum = new THREE.WebGLRenderTarget(w, h, opts);
-    let next = new THREE.WebGLRenderTarget(w, h, opts);
-    const accMaterial = new THREE.ShaderMaterial({
-      glslVersion: THREE.GLSL3,
-      vertexShader: OUTPUT_VERTEX,
-      fragmentShader: ACCUMULATE_FRAGMENT,
-      uniforms: { uSum: { value: null }, uFrame: { value: target.texture }, uWeight: { value: 0 } },
-      depthTest: false,
-      depthWrite: false,
-    });
-    const accScene = new THREE.Scene();
-    const accQuad = new THREE.Mesh(quad.geometry, accMaterial);
-    accQuad.frustumCulled = false;
-    accScene.add(accQuad);
-
-    renderer.setClearColor(0x000000, 1);
-    renderer.setRenderTarget(sum);
-    renderer.clear();
-    for (let i = 0; i < count; i++) {
-      const { state, weight } = frameAt(i);
-      renderToTarget(state);
-      accMaterial.uniforms.uSum.value = sum.texture;
-      accMaterial.uniforms.uWeight.value = weight;
-      renderer.setRenderTarget(next);
-      renderer.render(accScene, camera);
-      [sum, next] = [next, sum];
-    }
-    renderer.setRenderTarget(null);
-    outputMaterial.uniforms.uImage.value = sum.texture;
-    renderer.render(outputScene, camera);
-    const out = document.createElement('canvas');
-    out.width = renderer.domElement.width;
-    out.height = renderer.domElement.height;
-    out.getContext('2d').drawImage(renderer.domElement, 0, 0);
-    outputMaterial.uniforms.uImage.value = target.texture;
-    sum.dispose();
-    next.dispose();
-    accMaterial.dispose();
-    if (size) {
-      renderer.setPixelRatio(savedPr);
-      resize();
-    }
-    return { canvas: out, precision: float ? '32 Bit' : '16 Bit' };
   }
 
   /**
@@ -1017,24 +1271,26 @@ export function createRenderer(canvas) {
    * Bildhöhe so groß wirken wie am Bildschirm. Danach wird die normale Größe
    * wiederhergestellt; der Aufrufer muss neu zeichnen lassen.
    */
-  function renderOffscreen(s, width, height) {
-    const cssH = Math.max(1, canvas.clientHeight);
-    const savedPr = renderer.getPixelRatio();
-    renderer.setPixelRatio(1);
-    renderer.setSize(width, height, false);
-    target.setSize(width, height);
-    uniforms.uAspect.value = width / height;
-    // mindestens 1, damit Sterne auch in kleinen Bildern nicht unter ein Pixel schrumpfen
-    uniforms.uPixelRatio.value = Math.max(1, height / cssH);
-    render(s);
-    const out = document.createElement('canvas');
-    out.width = width;
-    out.height = height;
-    out.getContext('2d').drawImage(renderer.domElement, 0, 0);
-    renderer.setPixelRatio(savedPr);
-    resize();
+  function renderOffscreen(s, width, height, post) {
+    setRenderSize({ width, height });
+    render(s, typeof post === 'function' ? post({ width, height }) : post);
+    const out = copyCanvas();
+    setRenderSize(null);
     return out;
   }
 
-  return { renderer, setStars, resize, render, renderAccumulated, measureSphereRoundness, renderOffscreen, field3d };
+  /** Kopie der Zeichenfläche (direkt nach present/render aufrufen). */
+  function copyCanvas() {
+    const out = document.createElement('canvas');
+    out.width = renderer.domElement.width;
+    out.height = renderer.domElement.height;
+    out.getContext('2d').drawImage(renderer.domElement, 0, 0);
+    return out;
+  }
+
+  return {
+    renderer, setStars, resize, render, measureSphereRoundness, renderOffscreen, field3d,
+    beginAccumulation, accumulate, present, setRenderSize, imageSize, copyCanvas,
+    sumPrecision: floatOk ? '32 Bit' : '16 Bit',
+  };
 }

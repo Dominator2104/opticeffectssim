@@ -100,7 +100,7 @@ export function createCockpitOverlay(img) {
  *
  * @returns {Promise<{blob: Blob, withoutCockpit: boolean}>}
  */
-export async function composeSnapshot(glCanvas, overlay, caption) {
+export async function composeSnapshot(glCanvas, overlay, caption, includeCockpit = true) {
   const W = glCanvas.width;
   const H = glCanvas.height;
   const out = document.createElement('canvas');
@@ -111,16 +111,7 @@ export async function composeSnapshot(glCanvas, overlay, caption) {
   const base = g.getImageData(0, 0, W, H); // Sicherung ohne Cockpit
 
   let withoutCockpit = false;
-  const img = overlay.image;
-  if (overlay.isVisible() && img.complete && img.naturalWidth > 0) {
-    // wie CSS object-fit: cover
-    const s = Math.max(W / img.naturalWidth, H / img.naturalHeight);
-    const dw = img.naturalWidth * s;
-    const dh = img.naturalHeight * s;
-    g.globalAlpha = overlay.opacity();
-    g.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
-    g.globalAlpha = 1;
-  }
+  if (includeCockpit) drawCockpit(g, W, H, overlay);
   if (caption) drawCaption(g, caption, W, H);
 
   try {
@@ -138,6 +129,19 @@ export async function composeSnapshot(glCanvas, overlay, caption) {
   }
 }
 
+/** Cockpit über das Bild legen (wie CSS object-fit: cover), wenn eingeblendet und geladen. */
+export function drawCockpit(g, W, H, overlay) {
+  const img = overlay.image;
+  if (!overlay.isVisible() || !img.complete || !(img.naturalWidth > 0)) return false;
+  const s = Math.max(W / img.naturalWidth, H / img.naturalHeight);
+  const dw = img.naturalWidth * s;
+  const dh = img.naturalHeight * s;
+  g.globalAlpha = overlay.opacity();
+  g.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  g.globalAlpha = 1;
+  return true;
+}
+
 function toBlob(canvas) {
   return new Promise((resolve, reject) => {
     try {
@@ -148,7 +152,7 @@ function toBlob(canvas) {
   });
 }
 
-function drawCaption(g, text, W, H) {
+export function drawCaption(g, text, W, H) {
   const size = Math.max(12, Math.round(H / 55));
   g.font = `${size}px system-ui, sans-serif`;
   const pad = Math.round(size * 0.5);

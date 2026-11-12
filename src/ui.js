@@ -96,7 +96,7 @@ function betaControlHtml() {
     <label class="row">β = v/c</label>
     <div class="row">
       <input data-k="slider" type="range" min="0" max="1" step="0.0001" value="0" aria-label="β-Regler" />
-      <input data-k="input" type="number" min="0" max="0.999" step="0.001" value="0" aria-label="β" />
+      <input data-k="input" type="text" inputmode="decimal" min="0" max="0.999" step="0.001" value="0" aria-label="β" />
     </div>
     <p class="note">Skala logarithmisch in (1 − β): feiner im oberen Bereich.</p>`;
 }
@@ -108,17 +108,17 @@ function accelControlHtml(inst) {
   const units = UNITS.map(([s, n]) => `<option value="${s}">${n}</option>`).join('');
   return `
     <label class="row">Kurve <select data-k="curve">${curves}</select></label>
-    <div class="row"><span>Start-β</span><input data-k="beta0" type="number" min="0" max="0.999" step="0.001" /></div>
-    <div class="row"><span>End-β</span><input data-k="beta1" type="number" min="0" max="0.999" step="0.001" /></div>
+    <div class="row"><span>Start-β</span><input data-k="beta0" type="text" inputmode="decimal" min="0" max="0.999" step="0.001" /></div>
+    <div class="row"><span>End-β</span><input data-k="beta1" type="text" inputmode="decimal" min="0" max="0.999" step="0.001" /></div>
     <div class="mode-row">
       <label><input type="radio" name="accmode-${inst}" value="acceleration" data-k="mode" /> Beschleunigung vorgeben</label>
       <label><input type="radio" name="accmode-${inst}" value="duration" data-k="mode" /> Dauer vorgeben</label>
     </div>
     <label class="row">Eigenbeschleunigung a
-      <span><input data-k="a" type="number" min="0" step="any" /> m/s²</span></label>
+      <span><input data-k="a" type="text" inputmode="decimal" min="0" step="any" /> m/s²</span></label>
     <label class="row">Dauer (Zeit in S)
-      <span><input data-k="duration" type="number" min="0" step="any" /> <select data-k="unit">${units}</select></span></label>
-    <label class="row">Abspielzeit <span><input data-k="play" type="number" min="1" max="600" step="1" /> s</span></label>
+      <span><input data-k="duration" type="text" inputmode="decimal" min="0" step="any" /> <select data-k="unit">${units}</select></span></label>
+    <label class="row">Abspielzeit <span><input data-k="play" type="text" inputmode="decimal" min="1" max="600" step="1" /> s</span></label>
     <div class="row buttons">
       <button type="button" data-action="start">▶ Start</button>
       <button type="button" data-action="pause">⏸ Pause</button>
@@ -127,9 +127,9 @@ function accelControlHtml(inst) {
     <p class="note" data-k="info"></p>`;
 }
 
-/** Zahl für ein Eingabefeld (Punkt als Dezimaltrenner, ohne überflüssige Stellen). */
-function fieldNumber(x, significant = 5) {
-  return String(Number(x.toPrecision(significant)));
+/** Zahl für ein Eingabefeld (Komma als Dezimaltrenner, ohne überflüssige Stellen). */
+export function fieldNumber(x, significant = 5) {
+  return String(Number(x.toPrecision(significant))).replace('.', ',');
 }
 
 /* ------------------------------------------------------------------------- */
@@ -156,7 +156,7 @@ export function createUI(state, cb) {
     state.gamma = lorentzGamma(state.beta);
     for (const { slider, input } of betaEls) {
       if (slider !== sourceEl) slider.value = String(sliderFromBeta(state.beta));
-      if (input !== sourceEl) input.value = state.beta.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+      if (input !== sourceEl) input.value = state.beta.toFixed(4).replace(/0+$/, '').replace(/\.$/, '').replace('.', ',');
     }
   }
   for (const { slider, input } of betaEls) {
@@ -187,8 +187,8 @@ export function createUI(state, cb) {
         if (e !== sourceEl && String(e.value) !== v) e.value = v;
       };
       set('curve', acc.curve);
-      set('beta0', String(acc.beta0));
-      set('beta1', String(acc.beta1));
+      set('beta0', fieldNumber(acc.beta0));
+      set('beta1', fieldNumber(acc.beta1));
       for (const r of el.querySelectorAll('[data-k=mode]')) r.checked = r.value === acc.mode;
       set('unit', String(acc.unitS));
       set('a', valid ? fieldNumber(acc.a) : '–');
@@ -200,7 +200,9 @@ export function createUI(state, cb) {
       // berechnete Größe nur anzeigen, nicht eingeben
       f('a').readOnly = acc.mode !== 'acceleration';
       f('duration').readOnly = acc.mode !== 'duration';
-      el.querySelector('[data-action=start]').disabled = !valid;
+      const start = el.querySelector('[data-action=start]');
+      start.disabled = !valid;
+      start.title = valid ? 'Beschleunigungsphase abspielen (Leertaste)' : 'Start- und End-β müssen sich unterscheiden (und a bzw. Dauer > 0 sein)';
     }
   }
   for (const el of accelEls) {
@@ -258,7 +260,8 @@ export function createUI(state, cb) {
     $('mode3d-panel').classList.toggle('hidden', !v);
     $('place3d-row').hidden = !v;
     $('flyby').disabled = v;
-    $('blur-png').disabled = !v;
+    $('flyby-reason').hidden = !v;
+    $('flyby').title = v ? 'Im 3D-Modus nicht verfügbar – Vorbeiflug nur auf der Himmelskugel' : '';
     cb.onMode3d(v);
     refreshAccel(null);
   });
@@ -309,62 +312,136 @@ export function createUI(state, cb) {
     if ($('cockpit-status').textContent !== t) $('cockpit-status').textContent = t;
   }, 300);
 
-  // ---- Standbild ----
-  $('export-png').addEventListener('click', async () => {
-    $('export-status').textContent = 'Speichere …';
-    try {
-      $('export-status').textContent = await cb.onExport($('export-caption').checked);
-    } catch (e) {
-      $('export-status').textContent = `Fehler: ${e.message}`;
-    }
+  // ---- Kamera: Sternmodell, Objektiv, Bewegungsunschärfe, Werte im Bild ----
+  const cam = state.camera;
+  for (const r of document.querySelectorAll('input[name=star-model]')) {
+    const apply = () => r.checked && (cam.starModel = r.value);
+    r.addEventListener('change', apply);
+    apply();
+  }
+  const numberField = (id, apply, min, max, show = fieldNumber) => {
+    const el = $(id);
+    const read = () => {
+      const v = parse(el);
+      if (Number.isFinite(v) && v >= min && v <= max) apply(v);
+    };
+    el.addEventListener('change', () => {
+      read();
+      cb.onSettingsChanged?.();
+    });
+    read();
+    return (v) => (el.value = show(v));
+  };
+  bindCheckbox('cam-lens', (v) => {
+    cam.lens.enabled = v;
+    $('cam-lens-panel').classList.toggle('hidden', !v);
+  });
+  numberField('cam-fwhm', (v) => (cam.lens.fwhm = v), 0.2, 30);
+  bindCheckbox('cam-halo', (v) => {
+    cam.halo.enabled = v;
+    $('cam-halo-panel').classList.toggle('hidden', !v);
+  });
+  numberField('cam-halo-frac', (v) => (cam.halo.percent = v), 0, 50);
+  numberField('cam-halo-fwhm', (v) => (cam.halo.fwhm = v), 2, 300);
+  bindCheckbox('cam-airy', (v) => {
+    cam.airy.enabled = v;
+    $('cam-airy-panel').classList.toggle('hidden', !v);
+  });
+  numberField('cam-fnum', (v) => (cam.airy.fNumber = v), 0.7, 128);
+  numberField('cam-sensor', (v) => (cam.airy.sensorMm = v), 1, 100);
+  bindCheckbox('cam-vignette', (v) => (cam.vignette = v));
+  $('cam-tone').addEventListener('change', (e) => (cam.tone = e.target.value));
+  cam.tone = $('cam-tone').value;
+  bindCheckbox('hud-on', (v) => {
+    cam.hud = v;
+    $('hud').hidden = !v;
   });
 
-  // ---- Standbild mit Bewegungsunschärfe (3D-Flug) ----
   const blur = state.blur;
-  $('blur-tb').addEventListener('change', (e) => {
-    const v = parseFraction(e.target.value);
+  bindCheckbox('blur-on', (v) => {
+    blur.enabled = v;
+    $('blur-panel').classList.toggle('hidden', !v);
+  });
+  const tbField = $('blur-tb');
+  const readTb = () => {
+    const v = parseFraction(tbField.value);
     if (v >= 0 && v <= 10) blur.tb = v;
-    e.target.value = fractionText(blur.tb);
+  };
+  tbField.addEventListener('change', () => {
+    readTb();
+    tbField.value = fractionText(blur.tb);
   });
-  $('blur-dv').addEventListener('change', (e) => {
-    const v = parse(e.target);
-    if (v >= 0 && v < 1) blur.dv = v;
-    e.target.value = String(blur.dv);
+  readTb();
+  $('blur-source').addEventListener('change', (e) => {
+    blur.source = e.target.value;
+    $('blur-dvdt-panel').classList.toggle('hidden', blur.source !== 'dvdt');
   });
-  $('blur-dt').addEventListener('change', (e) => {
-    const v = parse(e.target);
-    if (v > 0) blur.dt = v;
-    e.target.value = String(blur.dt);
-  });
-  $('blur-film').addEventListener('change', (e) => (blur.filmFormat = e.target.checked));
-  $('blur-png').disabled = !state.flight.enabled;
-  $('blur-png').addEventListener('click', async () => {
-    $('blur-status').textContent = 'Rechne Teilbilder …';
-    $('blur-png').disabled = true;
-    await new Promise((r) => setTimeout(r, 30));
+  blur.source = $('blur-source').value;
+  $('blur-dvdt-panel').classList.toggle('hidden', blur.source !== 'dvdt');
+  numberField('blur-dv', (v) => (blur.dv = v), 0, 0.999);
+  numberField('blur-dt', (v) => (blur.dt = v), 1e-6, 1e12);
+  $('blur-cap').addEventListener('change', (e) => (blur.liveCap = Number(e.target.value)));
+  blur.liveCap = Number($('blur-cap').value);
+
+  // ---- Export ----
+  const ex = state.export;
+  $('export-format').addEventListener('change', (e) => (ex.format = e.target.value));
+  ex.format = $('export-format').value;
+  bindCheckbox('export-caption', (v) => (ex.caption = v));
+  bindCheckbox('export-cockpit', (v) => (ex.cockpit = v));
+  const runExport = async (fn) => {
+    setStatus('Rechne …');
+    await new Promise((r) => setTimeout(r, 20));
     try {
-      $('blur-status').textContent = await cb.onBlurExport($('export-caption').checked);
+      setStatus(await fn());
     } catch (e) {
-      $('blur-status').textContent = `Fehler: ${e.message}`;
-    } finally {
-      $('blur-film').addEventListener('change', (e) => (blur.filmFormat = e.target.checked));
-  $('blur-png').disabled = !state.flight.enabled;
+      setStatus(`Fehler: ${e.message}`);
     }
+  };
+  $('export-png').addEventListener('click', () => runExport(() => cb.onExport()));
+  $('showcase-btn').addEventListener('click', () => runExport(() => cb.onShowcase()));
+  $('export-cancel').addEventListener('click', () => cb.onCancel());
+  const videoPanel = $('video-panel');
+  $('video-toggle').addEventListener('click', () => {
+    const open = videoPanel.classList.toggle('hidden') === false;
+    $('video-toggle').setAttribute('aria-expanded', String(open));
+    if (open) videoPanel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
 
-  $('showcase-btn').addEventListener('click', async () => {
-    $('showcase-status').textContent = 'Berechne Showcase-Bild …';
-    $('showcase-btn').disabled = true;
-    // kurz warten, damit die Statuszeile erscheint, bevor gerechnet wird
-    await new Promise((r) => setTimeout(r, 30));
-    try {
-      $('showcase-status').textContent = await cb.onShowcase();
-    } catch (e) {
-      $('showcase-status').textContent = `Fehler: ${e.message}`;
-    } finally {
-      $('showcase-btn').disabled = false;
-    }
+  // ---- Video ----
+  const vid = state.video;
+  const sel = (id, apply) => {
+    $(id).addEventListener('change', (e) => apply(e.target.value));
+    apply($(id).value);
+  };
+  sel('video-res', (v) => (vid.res = v));
+  sel('video-fps', (v) => (vid.fps = Number(v)));
+  sel('video-mode', (v) => {
+    vid.mode = v;
+    $('video-phase-opts').classList.toggle('hidden', v !== 'phase');
+    $('video-run-opts').classList.toggle('hidden', v !== 'run');
   });
+  numberField('video-pre', (v) => (vid.pre = v), 0, 600);
+  numberField('video-post', (v) => (vid.post = v), 0, 600);
+  numberField('video-duration', (v) => (vid.duration = v), 0.1, 3600);
+  numberField('video-scale', (v) => (vid.scale = v), 1e-6, 1e9);
+  sel('video-scale-unit', (v) => (vid.scaleUnit = Number(v)));
+  numberField('video-shutter', (v) => (vid.shutterDeg = v), 0, 360);
+  bindCheckbox('video-blur', (v) => (vid.blur = v));
+  sel('video-codec', (v) => (vid.codec = v));
+  numberField('video-bitrate', (v) => (vid.bitrateMbps = v), 0.1, 400);
+  numberField('video-keyint', (v) => (vid.keyframeSeconds = v), 0.1, 60);
+  bindCheckbox('video-cockpit', (v) => (vid.cockpit = v));
+  bindCheckbox('video-caption', (v) => (vid.caption = v));
+  $('video-start').addEventListener('click', () => runExport(() => cb.onVideo()));
+
+  // ---- Vorgaben ----
+  $('preset-film').addEventListener('click', () => cb.onPresetFilm());
+  $('reset-all').addEventListener('click', () => cb.onResetAll());
+
+  function setStatus(text) {
+    if ($('export-status').textContent !== text) $('export-status').textContent = text;
+  }
 
   // ---- Terrell-Körper ----
   const bodies = state.bodies;
@@ -409,8 +486,24 @@ export function createUI(state, cb) {
   return {
     setBeta,
     refreshAccel,
+    playPause: () => cb.onPresentPlay(),
     setBlurInfo(text) {
       if ($('blur-info').textContent !== text) $('blur-info').textContent = text;
+    },
+    setText(id, text) {
+      if ($(id).textContent !== text) $(id).textContent = text;
+    },
+    setStatus,
+    /** Fortschritt eines Exports: p in [0, 1] oder null zum Ausblenden. */
+    setProgress(p, text = '') {
+      const box = $('export-progress');
+      box.hidden = p === null;
+      if (p === null) return;
+      box.querySelector('.bar span').style.width = `${(100 * Math.min(1, Math.max(0, p))).toFixed(1)}%`;
+      box.querySelector('.ptext').textContent = text;
+    },
+    setExporting(busy) {
+      for (const id of ['export-png', 'showcase-btn', 'video-start']) $(id).disabled = busy;
     },
     setAccelInfo(text) {
       for (const el of accelEls) {

@@ -28,6 +28,11 @@ import {
   motionBlurOffsetLy,
   motionBlurSchedule,
   motionBlurStepCount,
+  advanceProperTime,
+  shutterPlanFromCurve,
+  rapidityChangeDuringExposure,
+  accelerationDuration,
+  accelerationBeta,
   SECONDS_PER_YEAR,
 } from '../src/physics.js';
 import { generateStars, STAR_SEED } from '../src/stars.js';
@@ -225,3 +230,53 @@ describe('Belichtungsplan', () => {
     }
   });
 });
+
+describe('Beliebige Beschleunigungskurve (live und Video)', () => {
+  it('advanceProperTime: konstantes β → dt = γ·dτ, Strecke β·γ·dτ', () => {
+    const r = advanceProperTime(() => 0.8, 10, 2, 4);
+    expect(r.t).toBeCloseTo(10 + 2 / 0.6, 12);
+    expect(r.distanceLy * SECONDS_PER_YEAR).toBeCloseTo((0.8 / 0.6) * 2, 10);
+  });
+
+  it('advanceProperTime folgt der Hyperbelbewegung: τ = (c/a)·arsinh(at/c)', () => {
+    const a = FILM_A();
+    const betaOfT = (t) => betaConstantProperAcceleration(a, Math.max(0, t));
+    const t0 = 2;
+    const r = advanceProperTime(betaOfT, t0, 0.7, 64);
+    expect(properTimeConstantAcceleration(a, r.t) - properTimeConstantAcceleration(a, t0)).toBeCloseTo(0.7, 8);
+  });
+
+  it('shutterPlanFromCurve stimmt bei konstanter Eigenbeschleunigung mit motionBlurSchedule überein', () => {
+    const a = FILM_A();
+    const T = accelerationDuration(a, 0, 0.99);
+    const betaOfT = (t) => accelerationBeta('constant', t, T, 0, 0.99);
+    for (const tNow of [1, 3.5, 6]) {
+      const betaEnd = betaOfT(tNow);
+      const p1 = shutterPlanFromCurve({ betaOfT, tNow, exposure: TB, steps: 12, substeps: 16 });
+      const p2 = motionBlurSchedule({ betaEnd, a, exposure: TB, steps: 12 });
+      for (let i = 0; i < 12; i++) {
+        expect(p1[i].tau).toBeCloseTo(p2[i].tau, 12);
+        expect(p1[i].beta).toBeCloseTo(p2[i].beta, 9);
+        expect(p1[i].dzLy / p2[i].dzLy).toBeCloseTo(1, 6);
+      }
+      expect(rapidityChangeDuringExposure(betaOfT, tNow, TB)).toBeCloseTo((a / C) * TB, 6);
+    }
+  });
+
+  it('vor dem Beginn und bei t_b = 0', () => {
+    const betaOfT = (t) => (t < 0 ? 0.2 : 0.2 + 0.1 * Math.min(1, t));
+    expect(shutterPlanFromCurve({ betaOfT, tNow: 0.5, exposure: 0, steps: 9 })).toEqual([{ tau: 0, beta: 0.25, dzLy: 0, weight: 1 }]);
+    const p = shutterPlanFromCurve({ betaOfT, tNow: -1, exposure: 0.1, steps: 4 });
+    for (const s of p) expect(s.beta).toBe(0.2);
+  });
+
+  it('Teilbilder über die Rapidität: deltaEta ersetzt a·t_b/c', () => {
+    const n1 = motionBlurStepCount({ a: A_FILM, exposure: TB, betaEnd: 0.99, pxPerRadian: 1000 });
+    const n2 = motionBlurStepCount({ deltaEta: (A_FILM / C) * TB, exposure: TB, betaEnd: 0.99, pxPerRadian: 1000 });
+    expect(n2).toBe(n1);
+  });
+});
+
+function FILM_A() {
+  return properAccelerationForProperTime(0, 0.99, 3);
+}
