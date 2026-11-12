@@ -86,7 +86,8 @@ function createEditableTable(container, spec) {
       const td = document.createElement('td');
       td.className = 'in';
       const input = document.createElement('input');
-      input.type = 'number';
+      input.type = 'text';
+      input.inputMode = 'decimal';
       input.step = String(c.step);
       input.value = String(values[i]);
       input.setAttribute('aria-label', c.label);

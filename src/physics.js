@@ -813,13 +813,86 @@ export function motionBlurSchedule({ betaEnd, a, exposure, steps }) {
  *
  * mal der größten Bildskala pxPerRadian (Pixel je Bogenmaß am Bildrand).
  */
-export function motionBlurStepCount({ a, exposure, betaEnd, pxPerRadian, nearestLy = Infinity, maxStepPx = 1, maxSteps = 4096 }) {
+export function motionBlurStepCount({ a = 0, deltaEta, exposure, betaEnd, pxPerRadian, nearestLy = Infinity, maxStepPx = 1, maxSteps = 4096 }) {
   if (!(exposure > 0)) return 1;
-  const aberrationRad = (a / C) * exposure;
+  // Wegen dψ'/dη = −sin ψ' wandert ein Stern um höchstens die Änderung der
+  // Rapidität Δη (konstante Eigenbeschleunigung: Δη = a·t_b/c).
+  const aberrationRad = deltaEta ?? (a / C) * exposure;
   const travelLy = (properVelocity(betaEnd) * exposure) / SECONDS_PER_YEAR;
   const parallaxRad = nearestLy > 0 ? (travelLy / nearestLy) * lorentzGamma(betaEnd) * (1 + betaEnd) : 0;
   const shiftPx = pxPerRadian * (aberrationRad + parallaxRad);
   return Math.min(maxSteps, Math.max(1, Math.ceil(shiftPx / maxStepPx)));
+}
+
+/**
+ * Fortschreiten in der Bordzeit τ für eine beliebige Kurve β(t) (t = Zeit in S):
+ *
+ *   dt/dτ = γ(β(t))            (Zeitdilatation)
+ *   dz/dτ = β·γ·c              (Strecke in S)
+ *
+ * Runge-Kutta 4. Ordnung mit n Schritten; dTau darf negativ sein (rückwärts).
+ * Ergänzt am 12.11.2026 für die Bewegungsunschärfe live und im Video.
+ *
+ * @param {(t:number)=>number} betaOfT  β zur Zeit t in S
+ * @returns {{t:number, distanceLy:number}}  neue Zeit in S, zurückgelegte Strecke in Lj
+ */
+export function advanceProperTime(betaOfT, t0, dTau, n = 16) {
+  const h = dTau / n;
+  const rates = (t) => {
+    const b = betaOfT(t);
+    const g = 1 / Math.sqrt(1 - b * b);
+    return [g, b * g];
+  };
+  let t = t0;
+  let z = 0; // in Lichtsekunden
+  for (let i = 0; i < n; i++) {
+    const [g1, u1] = rates(t);
+    const [g2, u2] = rates(t + 0.5 * h * g1);
+    const [g3, u3] = rates(t + 0.5 * h * g2);
+    const [g4, u4] = rates(t + h * g3);
+    t += (h / 6) * (g1 + 2 * g2 + 2 * g3 + g4);
+    z += (h / 6) * (u1 + 2 * u2 + 2 * u3 + u4);
+  }
+  return { t, distanceLy: z / SECONDS_PER_YEAR };
+}
+
+/**
+ * Belichtungsplan für eine beliebige Kurve β(t) der Beschleunigungsphase: Die
+ * Belichtung [−t_b, 0] (Bordzeit) endet beim aktuellen Zeitpunkt t_jetzt (in
+ * S). Rückwärts integriert (advanceProperTime) ergeben sich für die Mitte jedes
+ * Teilbilds die Zeit in S, daraus β, und der Ort des Schiffs relativ zum Ende.
+ * Gewicht je Teilbild 1/n. Für die konstante Eigenbeschleunigung stimmt das mit
+ * motionBlurSchedule() überein (getestet).
+ *
+ * @returns {{tau:number, beta:number, dzLy:number, weight:number}[]}  zeitlich aufsteigend
+ */
+export function shutterPlanFromCurve({ betaOfT, tNow, exposure, steps, substeps = 8 }) {
+  if (!(exposure > 0)) return [{ tau: 0, beta: betaOfT(tNow), dzLy: 0, weight: 1 }];
+  const n = Math.max(1, Math.round(steps));
+  const h = exposure / n;
+  const plan = [];
+  let t = tNow;
+  let z = 0;
+  let tau = 0;
+  for (let i = n - 1; i >= 0; i--) {
+    const dTau = i === n - 1 ? -0.5 * h : -h;
+    const r = advanceProperTime(betaOfT, t, dTau, substeps);
+    t = r.t;
+    z += r.distanceLy;
+    tau += dTau;
+    plan.push({ tau, beta: betaOfT(t), dzLy: z, weight: 1 / n });
+  }
+  return plan.reverse();
+}
+
+/**
+ * Änderung der Rapidität η = artanh β während der Belichtung (Betrag) für eine
+ * beliebige Kurve β(t); Grundlage für die Zahl der Teilbilder.
+ */
+export function rapidityChangeDuringExposure(betaOfT, tNow, exposure) {
+  if (!(exposure > 0)) return 0;
+  const tStart = advanceProperTime(betaOfT, tNow, -exposure, 8).t;
+  return Math.abs(Math.atanh(betaOfT(tNow)) - Math.atanh(betaOfT(tStart)));
 }
 
 /* ------------------------------------------------------------------------- */

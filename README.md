@@ -130,7 +130,8 @@ welche Funktion aus `physics.js` sie übersetzt.
 | Anteil im Sichtbaren | `f(T) = ∫₃₈₀⁷⁸⁰ B_λ dλ / (σT⁴/π)` | `visibleFraction` (blackbody.js) | Stefan-Boltzmann; Kennzeichnung „nur UV/IR“ bei `f < 1 %` |
 | Wanderung beim Beschleunigen | `dψ'/dβ = −γ²·sin ψ'`; bei konstanter Eigenbeschleunigung `dψ'/dτ = −(a/c)·sin ψ'` | `aberrationAngleRate` | aus der Aberrationsformel, im Kommentar hergeleitet |
 | Hyperbelbewegung in Eigenzeit | `β(τ) = tanh(artanh β₀ + aτ/c)`, `a = c·artanh(Δv/c)/Δt` | `betaHyperbolicProperTime`, `properAccelerationForProperTime` | Rapidität wächst linear mit der Eigenzeit; gegen `betaConstantProperAcceleration` getestet |
-| Bewegungsunschärfe | Teilbilder mit `β(τᵢ)` und Ort `z(τᵢ)`, Gewicht `1/n`, linear summiert | `motionBlurBetaAt`, `motionBlurOffsetLy`, `motionBlurSchedule`, `motionBlurStepCount` | Abschnitt „Standbild mit Bewegungsunschärfe“ unten |
+| Bewegungsunschärfe | Teilbilder mit `β(τᵢ)` und Ort `z(τᵢ)`, Gewicht `1/n`, linear summiert | `motionBlurBetaAt`, `motionBlurOffsetLy`, `motionBlurSchedule`, `motionBlurStepCount` | Abschnitt „Bewegungsunschärfe“ unten |
+| Bordzeit bei beliebiger Kurve β(t) | `dt/dτ = γ`, `dz/dτ = β·γ·c` (RK4) | `advanceProperTime`, `shutterPlanFromCurve`, `rapidityChangeDuringExposure` | Zeitdilatation; gegen die geschlossene Hyperbelbewegung getestet |
 
 Farbe (`src/blackbody.js`): Planck-Spektrum `B_λ(λ, T)` wird über 380–780 nm
 gegen die CIE-1931-Normspektralwertfunktionen (2°-Normalbeobachter, 5-nm-Schritte,
@@ -157,8 +158,9 @@ Spektrum des Sterns als vollständiges Planck-Spektrum annimmt.
 ## Tests
 
 `npm test` führt `tests/physics.test.js`, `tests/blackbody.test.js`,
-`tests/stars3d.test.js` und `tests/motionblur.test.js` aus (67 Tests; die 13 Tests
-der Bewegungsunschärfe sind unten im Abschnitt „Standbild mit Bewegungsunschärfe“ aufgeführt). Sollwerte bei β = 0,9:
+`tests/stars3d.test.js`, `tests/motionblur.test.js` und `tests/optics.test.js` aus
+(80 Tests; die Tests der Bewegungsunschärfe und des Objektivs sind unten in den
+jeweiligen Abschnitten aufgeführt). Sollwerte bei β = 0,9:
 
 | Größe | Sollwert |
 |---|---|
@@ -237,11 +239,16 @@ Beschleunigungsphase sind in beiden vorhanden und immer synchron.
   dieser Uhr. Sterndichte 0,1× bis 4× der realistischen Dichte (0,004 Sterne/Lj³),
   Zellgröße (Kantenlänge) 20–250 Lj. Angezeigt werden τ, t in `S`, Strecke,
   geladene Sterne und Abstand zum nächsten Stern.
-- **Ansicht:** Projektion (Perspektive / stereografisch), Sichtfeld (Vorgabe 60°),
-  Belichtung, Sternzahl der Himmelskugel (10 000 bis 1 000 000). Umschauen durch Ziehen mit der
-  Maus, Doppelklick schaut wieder nach vorn.
-- **Standbild speichern** als PNG, wahlweise mit den Werten (β, γ, Projektion, Sichtfeld) im Bild.
-- **Showcase-Bild** (Knopf „✨ Showcase-Bild“ unter „Standbild“): Poster in 3840 × 2160
+- **Kamera:** Projektion (Perspektive / stereografisch), Sichtfeld (Vorgabe 60°),
+  Belichtung, Sternzahl der Himmelskugel (10 000 bis 1 000 000), Sternabbildung,
+  simuliertes Objektiv und Bewegungsunschärfe (Abschnitte unten). Umschauen durch
+  Ziehen mit der Maus oder dem Finger, Doppelklick schaut wieder nach vorn.
+- **Export** (alle Bildausgaben in einem Abschnitt): Bildformat (wie Ansicht,
+  Film 2272 × 951, Full HD, 4K), Werte ins Bild schreiben, Cockpit mitspeichern;
+  Knöpfe **Standbild (PNG)**, **Video…** und **Showcase-Poster**. Während eines
+  Exports zeigt ein Fortschrittsbalken Bild, Teilbild und Restzeit, „Abbrechen“
+  hält an. Ein gesperrter Knopf nennt beim Darüberfahren den Grund.
+- **Showcase-Poster:** Poster in 3840 × 2160
   im Stil der Programmoberfläche. Das Simulationsbild füllt das ganze Poster und wird dafür
   neu gerendert. Darüber liegen halbtransparente Fenster:
   - **Steuerung:** die Schieberegler (β mit logarithmischer Skala, Sichtfeld, Belichtung),
@@ -274,67 +281,68 @@ Zeilen: Aberration (ψ → ψ', Verschiebung, Himmelsanteil des Kegels in `S` un
 Terrell-Drehung (ψ' → ψ, Drehwinkel, Verkürzung) und Doppler-Effekt (ψ', λ, T →
 D, λ', Bereich von λ', T', Farbe bei T').
 
-## Standbild mit Bewegungsunschärfe (3D-Flug)
+## Bewegungsunschärfe (live, Standbild und Video)
 
-*Ergänzt am 03./04.11.2026.*
+*Ergänzt am 03./04.11.2026, live und im normalen Modus seit 12.11.2026.*
 
 Eine echte Kamera belichtet jedes Bild eine endliche Zeit lang. Ändert sich
 währenddessen β oder der Ort des Schiffs, wandern die Sterne im Bild und
-hinterlassen Streifen. Der Knopf **„Standbild mit Bewegungsunschärfe (PNG)“**
-im Abschnitt „Standbild“ rechnet das für den 3D-Flug nach. Streifen entstehen
+hinterlassen Streifen. Der Schalter **„Belichtungszeit simulieren“** (Abschnitt
+„Kamera“) rechnet das nach, in der Ansicht, im Standbild und im Video, im
+normalen Modus (Himmelskugel) wie im 3D-Flug. Streifen entstehen
 **ausschließlich** aus dieser Rechnung: Es gibt keinen künstlichen
 Streifeneffekt, keine Überlichtphase und keine gekrümmte Raumzeit.
 
 **Einstellungen:**
-- **Verschlusszeit t_b:** Vorgabe 1/48 s (24 Bilder/s, 180°-Umlaufverschluss).
-  Sie gilt an Bord, also in der Eigenzeit der Kamera.
-- **Beschleunigung während der Aufnahme**, angegeben als Δv in Δt: Vorgabe
-  Δv = 0,99 c in Δt = 3 s (00:56:54 → 00:56:57 der Filmszene). Daraus folgt
-  `a = c·artanh(Δv/c)/Δt = 2,645·10⁸ m/s² ≈ 2,70·10⁷ g`.
-- Die **Belichtung endet im aktuellen Moment** beim aktuellen β (Regler).
-  Vorher wurde mit a beschleunigt, aber nicht unter β = 0 (davor in Ruhe):
-  `β(τ) = tanh(max(0, artanh β_E + aτ/c))` für `−t_b ≤ τ ≤ 0`.
-- Bei Δv = 0 bleibt die Geschwindigkeit konstant. Dann bewegen sich Lichtjahre
-  entfernte Sterne in 1/48 s praktisch nicht, das Bild gleicht dem normalen
-  Standbild.
+- **Verschlusszeit t_b** (als Bruch oder Dezimalzahl, Vorgabe 1/48 s: 24 Bilder/s,
+  180°-Umlaufverschluss). Sie gilt **an Bord**, also in der Eigenzeit der Kamera.
+- **Beschleunigung während t_b:**
+  - *aus der Beschleunigungsphase* (Vorgabe): Die Belichtung endet im aktuellen
+    Moment der laufenden oder angehaltenen Beschleunigungsphase; β(t) folgt der
+    gewählten Kurve (auch linear in β oder weiche Kurve). Ist keine Phase aktiv,
+    bleibt β konstant.
+  - *fest: Δv in Δt*: Vorgabe Δv = 0,99 c in Δt = 3 s (00:56:54 → 00:56:57 der
+    Filmszene), daraus `a = c·artanh(Δv/c)/Δt = 2,645·10⁸ m/s² ≈ 2,70·10⁷ g`;
+    vorher `β(τ) = tanh(max(0, artanh β_E + aτ/c))` für `−t_b ≤ τ ≤ 0`.
+- **Teilbilder live höchstens** (4, 8, 16 oder 32, Vorgabe 16; auf Touch-Geräten höchstens 8).
+
+Bei konstantem β bewegt sich auf der Himmelskugel nichts, das Bild bleibt scharf.
+Im 3D-Flug wandern dann nur nahe Sterne (Parallaxe), Lichtjahre entfernte in
+1/48 s praktisch nicht.
 
 **Rechnung** (`physics.js`, Abschnitt 8):
 
-1. **Belichtungsplan** (`motionBlurSchedule`): Die Belichtung `[−t_b, 0]` wird in
-   n gleich lange Teilbilder zerlegt. Jedes wird in seiner Mitte ausgewertet:
-   - β(τ) nach der Formel oben;
-   - Ort des Schiffs in S, mit `dz = β·γ·c·dτ`, geschlossen
-     `z(τ) − z(0) = −(c²/a)·(cosh η(0) − cosh η(τ))` (`motionBlurOffsetLy`);
-   - Gewicht 1/n.
+1. **Belichtungsplan:** Die Belichtung `[τ_E − t_b, τ_E]` wird in n gleich lange
+   Teilbilder zerlegt, jedes in seiner Mitte ausgewertet, Gewicht 1/n.
+   - Beliebige Kurve β(t) in S (`shutterPlanFromCurve`): Von der aktuellen
+     Zeit t in S wird rückwärts in Bordzeit integriert, `dt/dτ = γ`,
+     `dz/dτ = β·γ·c` (RK4, `advanceProperTime`).
+   - Feste Eigenbeschleunigung (`motionBlurSchedule`): geschlossen,
+     `z(τ) − z(0) = −(c²/a)·(cosh η(0) − cosh η(τ))` (`motionBlurOffsetLy`).
+   Für die konstante Eigenbeschleunigung liefern beide Wege dasselbe (getestet).
 2. **Zahl der Teilbilder** (`motionBlurStepCount`): so viele, dass ein Stern je
-   Teilbild höchstens 1 px wandert. Die Obergrenze der Wanderung setzt sich
-   aus zwei Teilen zusammen:
-   - Aberration `|dψ'/dτ| = (a/c)·sin ψ' ≤ a/c`;
-   - Parallaxe: Strecke / Abstand des nächsten Sterns oder Körpers, mal
-     `D_max = γ(1 + β)`.
+   Teilbild höchstens 1 px wandert. Obergrenze der Wanderung:
+   - Aberration: höchstens die Änderung der Rapidität Δη während t_b
+     (bei konstantem a: `Δη = a·t_b/c`, wegen `|dψ'/dτ| = (a/c)·sin ψ' ≤ a/c`);
+   - Parallaxe (3D-Flug): Strecke / Abstand des nächsten Sterns oder Körpers,
+     mal `D_max = γ(1 + β)`.
 
    Das Ergebnis wird mit der größten Bildskala in der Bildecke multipliziert.
-3. **Rendern** (`render.js`, `renderAccumulated`): Jedes Teilbild wird mit den
-   normalen Shadern gerendert, also mit Aberration, Doppler und Beaming für das
-   momentane β und den momentanen Ort. Die Teilbilder werden gewichtet in
-   einem 32-Bit-Gleitkommapuffer aufsummiert. **Erst danach** folgen die
-   Begrenzung auf 1 und die sRGB-Kennlinie.
+3. **Rendern** (`render.js`, `beginAccumulation`/`accumulate`/`present`): Jedes
+   Teilbild wird mit den normalen Shadern gerendert (Aberration, Doppler,
+   Beaming für das momentane β und den momentanen Ort) und gewichtet in einem
+   32-Bit-Gleitkommapuffer aufsummiert. **Erst danach** folgen Objektiv,
+   Tonkurve und sRGB-Kennlinie.
 
-Ein ruhender Stern ist so hell wie im normalen Standbild. Ein bewegter
-verteilt dasselbe Licht auf seinen Streifen und wird dadurch dunkler.
+**Live:** Braucht ein Bild mehr Teilbilder als erlaubt, zeigt die Ansicht
+zuerst eine gröbere Zerlegung derselben Belichtung. Steht die Szene still
+(z. B. Beschleunigung angehalten), wird sie Bild für Bild verfeinert
+(grob → fein), bis alle Teilbilder drin sind. Standbild und Video rechnen immer
+mit allen Teilbildern. Die Anzeige „Teilbilder: x von y“ steht unter dem
+Schalter und im Debug-Panel.
 
-Bildausschnitt, Blickrichtung, Sichtfeld, Projektion und Auflösung entsprechen
-der Ansicht. Cockpit-Overlay und Beschriftung kommen wie beim normalen Standbild
-dazu.
-
-**Option „Bildformat des Films“:** Das Bild hat dann 2272 × 951 Pixel
-(2,39 : 1), wie die ausgewerteten Filmbilder. Blickrichtung, Projektion und
-vertikales Sichtfeld bleiben wie in der Ansicht. Das waagrechte Sichtfeld folgt
-aus dem Seitenverhältnis, bei 60° vertikal und Perspektive sind das 108°.
-Die Punktgrößen werden wie beim Showcase-Bild auf die Bildhöhe skaliert.
-Das freigestellte Cockpit hat fast dasselbe Seitenverhältnis (2000 × 839) und
-füllt das Bild deshalb nahezu ohne Beschnitt. Alle Werte stehen im Debug-Panel: Verschlusszeit, a, β bei
-Verschlussöffnung und am Ende, Zahl der Teilbilder.
+Ein ruhender Stern ist so hell wie ohne Unschärfe. Ein bewegter verteilt
+dasselbe Licht auf seinen Streifen und wird dadurch dunkler.
 
 **Was man erwarten kann:** Bei konstanter Eigenbeschleunigung gilt
 `dψ'/dτ = −(a/c)·sin ψ'`, unabhängig von β. Mit der Vorgabe wandert ein Stern
@@ -364,6 +372,119 @@ länger.
 - Kein Stern wandert je Teilbild mehr als 1 px.
 - Das Gesamtlicht bleibt bei 20-mal mehr Teilbildern gleich (1 %).
 - Bei β → 0 bleibt das Sternfeld unverändert.
+- Beliebige Kurve: `advanceProperTime` bei konstantem β (`τ = t/γ`) und bei
+  Hyperbelbewegung; `shutterPlanFromCurve` = `motionBlurSchedule` für die
+  Kurve mit konstantem a; Belichtung vor dem Start der Phase und t_b = 0;
+  die Δη-Form ergibt dieselbe Teilbildzahl wie die a-Form.
+
+## Simuliertes Objektiv (Kamera-Modell)
+
+*Ergänzt am 12.11.2026.* Alle Bausteine stehen als reine Funktionen in
+**`src/optics.js`** (getestet in `tests/optics.test.js`); `render.js` übersetzt
+sie nur in Shader-Durchgänge. Jeder Baustein ist einzeln schaltbar, alle
+Faltungen erhalten die Lichtmenge (Kerne auf Summe 1 normiert).
+
+**Sterne abbilden:**
+- *Bildschirm-Modell* (bisher): Hellere Sterne werden als größere Flecken
+  gezeichnet. Gut lesbar, aber keine Kamera.
+- *Kamera-Modell:* Jeder Stern ist ein Punkt, sein Licht fällt (bilinear
+  verteilt) auf die Pixel um seinen Bildort. Größe und Form entstehen erst
+  durch das Objektiv, Sättigung durch die Tonkurve. Verstärkung
+  `1 / Spitzenanteil des Objektivs` (`lensPeak`): Ein Stern der Helligkeit
+  „Belichtung“ erreicht im hellsten Pixel gerade Weiß.
+
+| Baustein | Formel | Funktion in `optics.js` |
+|---|---|---|
+| Unschärfe | Gauß-Punktbildfunktion, `FWHM = 2·√(2 ln 2)·σ`; Angabe in px bei 1080 Zeilen, skaliert mit der Bildhöhe | `gaussianKernel`, `gaussianPeak` |
+| Streulicht | zweiter, breiter Gauß mit Lichtanteil f (Vorgabe 2 %, FWHM 40 px); gerechnet auf ¼ Auflösung | `lensPeak` |
+| Beugung (Airy) | `I/I₀ = (2·J₁(x)/x)²`, `x = π·r/(λ·N)`; erstes Minimum `r = 1,22·λ·N`; je Farbkanal 610/550/465 nm; Pixelabstand = Sensorbreite / Bildbreite (Super 35: 24,89 mm) | `besselJ1`, `airyIntensity`, `airyFirstMinimumPx`, `airyKernel`, `pixelPitch` |
+| Randabdunklung | `E(α)/E(0) = cos⁴ α = 1/(1 + tan²α)²` (in der stereografischen Projektion mit dem dort gültigen α) | `vignetteCos4` |
+| Tonkurve | linear mit harter Grenze `min(1, x)` oder Film-Schulter `1 − e^(−x)` | `toneCurve` |
+
+Reihenfolge im Renderer: Summe der Teilbilder → Airy → Streulicht → Gauß →
+Randabdunklung → Tonkurve → sRGB. Bei f/2,8 und Super 35 ist das
+Airy-Scheibchen kleiner als ein Pixel und hat keine sichtbare Wirkung; erst
+bei kleiner Blende (z. B. f/22 und mehr) wird es sichtbar. Der Radius des
+ersten dunklen Rings steht unter dem Schalter.
+
+**Tests** (`tests/optics.test.js`): Gaußkern normiert mit verlangter
+Halbwertsbreite; Spitzenanteil 0,2206 bei FWHM 2 px; J₁ gegen Tabellenwerte
+und erste Nullstelle 3,8317; erster Airy-Ring 1,75 %; `r = 1,22·λ·N`;
+Airy-Kern normiert und rotationssymmetrisch; cos⁴-Gesetz; Tonkurven.
+
+## Export: Standbild, Showcase-Poster, Video
+
+**Standbild (PNG):** im gewählten Bildformat, mit Objektiv und
+Bewegungsunschärfe wie unter „Kamera“ eingestellt, immer mit allen
+Teilbildern. Blickrichtung, Projektion und vertikales Sichtfeld bleiben wie in
+der Ansicht, das waagrechte Sichtfeld folgt aus dem Seitenverhältnis (bei 60°
+vertikal und Perspektive im Filmformat 108°). Punktgrößen und
+Objektiv-Halbwertsbreiten werden auf die Bildhöhe skaliert. Das freigestellte
+Cockpit (2000 × 839) füllt das Filmformat nahezu ohne Beschnitt.
+
+**Video:** Bild für Bild berechnet (nicht in Echtzeit mitgeschnitten), mit
+WebCodecs im Browser kodiert und mit mediabunny in MP4 bzw. WebM verpackt.
+Jedes Bild bekommt genau den Zeitstempel k / Bildrate.
+
+| Einstellung | Bedeutung |
+|---|---|
+| Auflösung | wie Ansicht, 1280 × 720 bis 3840 × 2160, Film 2272 × 951 |
+| Bildrate | 24, 25, 30, 48, 50, 60 Bilder/s |
+| Ablauf | *Beschleunigungsphase*: Vorlauf (β₀ konstant) + ganze Phase + Nachlauf; *ab jetzt weiterlaufen*: feste Länge ab dem aktuellen Zustand |
+| Bordzeit je Videosekunde | Zeitmaßstab (s, min, h, Tage, Jahre); 1 s = Echtzeit an Bord |
+| Verschlusswinkel | `t_b = Winkel/360° · 1/Bildrate · Zeitmaßstab` (180° bei 24 Bilder/s = 1/48 s) |
+| Bewegungsunschärfe | aus dem Verschluss, wie oben (aus der Beschleunigungsphase) |
+| Codec | H.264 (MP4), VP9 (WebM), AV1 (MP4); vorher wird geprüft, ob der Browser ihn in dieser Größe kodieren kann |
+| Bitrate, Schlüsselbild | Mbit/s; Abstand der Schlüsselbilder in s |
+| Cockpit, Werte | Cockpit-Overlay und Beschriftung in jedes Bild |
+
+Für Bild k wird die Bordzeit `τ_k = k/Bildrate · Zeitmaßstab + t_b` erreicht
+(`advanceProperTime`, Zeit in S und Strecke mitgeführt), die Belichtung endet
+dort. Nach dem Export wird der vorige Zustand wiederhergestellt. Die Vorgabe
+„Filmszene“ stellt 2272 × 951, 24 Bilder/s, Beschleunigungsphase,
+Echtzeit an Bord und 180° ein.
+
+**Im Browser geprüft** (Chromium, Software-Rendering): 1280 × 720, 24 Bilder/s,
+H.264 und VP9 lesbar (ffprobe: richtige Bildzahl und Bildrate); Phase der
+Filmszene (3 s + 0,5 s Nachlauf = 84 Bilder) in knapp 3 Minuten.
+
+## Bedienung: Abschnitte, Speichern, Tastenkürzel, Handy
+
+- **Vorgabe Filmszene:** stellt die untersuchte Szene ein (3D-Flug,
+  Beschleunigung von 0 auf 0,99 c in 3 s Bordzeit, Kamera-Modell mit
+  Objektiv und Streulicht, Unschärfe 1/48 s, Cockpit, Filmformat). Mit der
+  Leertaste oder Play startet die Beschleunigung.
+- **Alles zurücksetzen:** löscht die gespeicherten Einstellungen und lädt neu.
+- **Speichern:** Alle Einstellungen und welche Abschnitte offen sind, merkt sich
+  der Browser (localStorage) und stellt sie beim nächsten Öffnen wieder her
+  (nicht der β-Regler).
+- **Abschnitte** einklappbar: Bewegung, 3D-Flug, Physikalische Effekte, Kamera,
+  Cockpit, Terrell-Körper, Export, Graphen, Debug. Längere Erklärungen stehen
+  hinter „ⓘ Erklärung“.
+- **Werte im Bild** (Schalter unter „Kamera“): β, γ, Bordzeit, Strecke,
+  Beschleunigung und Kamera-Einstellungen oben links in der Ansicht.
+- **Zahlen** mit Komma oder Punkt; die Felder öffnen auf dem Handy die Zifferntastatur.
+- **Tastenkürzel** (Knopf „?“ oben rechts):
+
+  | Taste | Wirkung |
+  |---|---|
+  | Leertaste | Flug bzw. Beschleunigung starten/anhalten |
+  | 3 | 3D-Modus an/aus |
+  | F | Blick nach vorn |
+  | L | Objektiv (Gauß) an/aus |
+  | B | Bewegungsunschärfe an/aus |
+  | H | Werte im Bild an/aus |
+  | E | Standbild speichern |
+  | V | Video-Einstellungen öffnen |
+  | P | Präsentationsmodus |
+  | D | Debug-Abschnitt |
+  | ? | Hilfe |
+  | Esc | Einstellungen (Handy) schließen |
+
+- **Handy und Tablet** (Breite bis 760 px): Die Ansicht füllt den Bildschirm,
+  die Einstellungen öffnen als Leiste von unten (Knopf „⚙ Einstellungen“ oder
+  ☰ oben links). Größere Bedienflächen bei Touch-Bedienung, live höchstens 8
+  Teilbilder.
 
 ## Cockpit-Bild
 
@@ -475,18 +596,22 @@ src/
   stars.js          Sternenfeld der Himmelskugel (fester Zufallsstartwert)
   stars3d.js        3D-Sternfeld in Zellen, Leuchtkraftmodell
   bodies.js         Würfel und Kugel für Terrell-Penrose
-  render.js         three.js-Szene, Shader
+  render.js         three.js-Szene, Shader, Teilbild-Summe, Objektiv-Durchgänge
   ui.js             Bedienelemente, Reiter, Debug-Panel, Graphen der Simulation
   charts.js         Liniendiagramme auf <canvas>
   overview.js       Reiter „Übersicht“: Diagramme und Tabellen
-  overlay.js        Cockpit-Bild, Standbild-Export
+  overlay.js        Cockpit-Bild, Beschriftung, Standbild-Export
+  optics.js         simuliertes Objektiv: Gauß, Airy, cos⁴, Tonkurven (reine Funktionen)
+  video.js          Video kodieren (WebCodecs + mediabunny)
+  panel.js          Abschnitte, Einstellungen speichern, Tastenkürzel, Handy-Leiste
   showcase.js       Showcase-Poster (4K) mit markierten Sternen und Faktenkarten
   style.css
 tests/
   physics.test.js   Vitest
   blackbody.test.js Vitest
   stars3d.test.js   Vitest
-  motionblur.test.js Vitest (Standbild mit Bewegungsunschärfe)
+  motionblur.test.js Vitest (Bewegungsunschärfe)
+  optics.test.js    Vitest (simuliertes Objektiv)
 assets/
   cockpit.png       freigestelltes Cockpit-Overlay (Standbild aus dem Film)
 ```
@@ -514,6 +639,10 @@ Literaturverzeichnis der Arbeit (bitte damit abgleichen).
 - CIE-1931-Normspektralwertfunktionen: Datensatz „CIE 1931 2 Degree Standard
   Observer“ aus colour-science 0.4.7 (nach CVRL, University College London).
 - IEC 61966-2-1 (sRGB): Umrechnungsmatrix XYZ → sRGB und sRGB-Kennlinie.
+- Besselfunktion J₁: rationale Näherung nach Press u. a., Numerical Recipes,
+  Abschnitt 6.5; Airy-Muster und cos⁴-Gesetz: Standardoptik (z. B. Hecht, Optik).
+- Video: mediabunny 1.62.1 (MPL-2.0) für MP4/WebM, Kodierung über die
+  WebCodecs-Schnittstelle des Browsers.
 - Bewegungsunschärfe: Hyperbelbewegung (Rapidität linear in der Eigenzeit) und
   `dψ'/dβ = −γ² sin ψ'` sind im Code aus den Formeln von Kapitel 3 hergeleitet;
   Literaturstellen mit Seite sind noch zu ergänzen.
