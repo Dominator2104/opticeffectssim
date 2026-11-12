@@ -193,6 +193,7 @@ const ui = createUI(state, {
   },
   onResetAll() {
     panel.resetAll();
+    this.onFlightReset();
   },
   onStarCount(n) {
     state.starCount = n;

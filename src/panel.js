@@ -103,6 +103,7 @@ function restore(values) {
 export function setupPanel({ state, actions }) {
   // ---- Abschnitte ----
   const sections = [...document.querySelectorAll('#panel details.sec')];
+  const sectionDefaults = Object.fromEntries(sections.map((d) => [d.id, d.open]));
   const open = load(SECTIONS_KEY) || {};
   for (const d of sections) {
     if (d.id in open) d.open = open[d.id];
@@ -113,6 +114,7 @@ export function setupPanel({ state, actions }) {
   }
 
   // ---- Einstellungen speichern ----
+  const defaults = snapshot(); // Vorgaben aus dem HTML, vor dem Wiederherstellen
   restore(load(STORE_KEY));
   let timer = 0;
   const schedule = () => {
@@ -203,15 +205,25 @@ export function setupPanel({ state, actions }) {
   });
 
   return {
-    /** Gespeicherte Einstellungen löschen und neu laden. */
+    /**
+     * Alle Einstellungen auf die Vorgaben zurücksetzen – ohne die Seite neu zu laden
+     * (ein Neuladen stellte über den „pagehide“-Speicher die alten Werte wieder her
+     * und braucht eine Anfrage an den Server).
+     */
     resetAll() {
+      clearTimeout(timer);
+      restore(defaults);
+      clearTimeout(timer); // von restore() ausgelöstes Speichern verwerfen
+      for (const d of sections) {
+        d.open = sectionDefaults[d.id];
+        delete open[d.id];
+      }
       try {
         localStorage.removeItem(STORE_KEY);
         localStorage.removeItem(SECTIONS_KEY);
       } catch {
         /* egal */
       }
-      location.reload();
     },
     setDrawer,
   };
