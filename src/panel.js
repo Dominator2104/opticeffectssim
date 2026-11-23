@@ -5,9 +5,11 @@
  * panel.js — allgemeine Bedienung der Seitenleiste (keine Physik):
  *   - einklappbare Abschnitte, Zustand wird gemerkt
  *   - alle Einstellungen im Browser speichern und beim nächsten Öffnen wiederherstellen
+ *   - Einstellungen in der Adresse (URL), damit man sie als Link weitergeben kann
  *   - Tastenkürzel und Hilfe-Fenster
  *   - schmale Bildschirme: Einstellungen als ausklappbare Leiste
  */
+import { encodeSettings, decodeSettings } from './urlstate.js';
 
 const $ = (id) => document.getElementById(id);
 const STORE_KEY = 'opticeffectssim.settings.v1';
@@ -113,15 +115,74 @@ export function setupPanel({ state, actions }) {
   }
 
   // ---- Einstellungen speichern ----
-  restore(load(STORE_KEY));
+  // Vorgaben merken, bevor etwas wiederhergestellt wird: in die Adresse kommt nur, was davon abweicht.
+  const defaults = snapshot();
+  // Enthält die Adresse Einstellungen (geteilter Link), gelten genau diese – die im Browser
+  // gespeicherten bleiben dann unberücksichtigt, sonst sähe der Empfänger ein anderes Bild.
+  const fromUrl = decodeSettings(location.search, defaults);
+  if (fromUrl.found) {
+    restore(fromUrl.values);
+    if (fromUrl.view) {
+      const r = Math.PI / 180;
+      state.yaw = fromUrl.view.yawDeg * r;
+      state.pitch = Math.max(-Math.PI / 2 + 1e-3, Math.min(Math.PI / 2 - 1e-3, fromUrl.view.pitchDeg * r));
+    }
+  } else {
+    restore(load(STORE_KEY));
+  }
+
+  /** Adresse mit den aktuellen Einstellungen (nur Abweichungen von der Vorgabe). */
+  const shareUrl = () => {
+    const d = 180 / Math.PI;
+    const query = encodeSettings(snapshot(), defaults, { yawDeg: state.yaw * d, pitchDeg: state.pitch * d });
+    return `${location.origin}${location.pathname}${query}${location.hash}`;
+  };
+  const updateUrl = () => {
+    try {
+      const url = shareUrl();
+      if (url !== location.href) history.replaceState(history.state, '', url);
+    } catch {
+      /* z. B. in einer Sandbox ohne history – egal */
+    }
+  };
+  let resetting = false; // beim Zurücksetzen nichts mehr speichern (pagehide käme sonst zuvor)
+  const persist = () => {
+    if (resetting) return;
+    save(STORE_KEY, snapshot());
+    updateUrl();
+  };
   let timer = 0;
   const schedule = () => {
     clearTimeout(timer);
-    timer = setTimeout(() => save(STORE_KEY, snapshot()), 400);
+    timer = setTimeout(persist, 400);
   };
   $('panel').addEventListener('change', schedule);
   $('panel').addEventListener('input', schedule);
-  window.addEventListener('pagehide', () => save(STORE_KEY, snapshot()));
+  // Blickrichtung ändert sich durch Ziehen im Bild, ohne Ereignis an der Seitenleiste
+  $('canvas').addEventListener('pointerup', schedule);
+  $('canvas').addEventListener('dblclick', schedule);
+  window.addEventListener('pagehide', persist);
+  updateUrl();
+
+  // ---- Link kopieren ----
+  const shareBtn = $('share-link');
+  const shareLabel = shareBtn.textContent;
+  let shareTimer = 0;
+  shareBtn.addEventListener('click', async () => {
+    updateUrl();
+    const url = shareUrl();
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(url);
+      ok = true;
+    } catch {
+      // ohne Zwischenablage (z. B. http ohne TLS): Adresse zum Kopieren anzeigen
+      window.prompt('Link mit den aktuellen Einstellungen:', url);
+    }
+    shareBtn.textContent = ok ? '✓ Link kopiert' : shareLabel;
+    clearTimeout(shareTimer);
+    shareTimer = setTimeout(() => (shareBtn.textContent = shareLabel), 2000);
+  });
 
   // ---- schmale Bildschirme: Einstellungen als ausklappbare Leiste ----
   const setDrawer = (on) => {
@@ -161,6 +222,7 @@ export function setupPanel({ state, actions }) {
       case 'f':
       case 'F':
         actions.frontView();
+        schedule();
         break;
       case 'l':
       case 'L':
@@ -203,11 +265,19 @@ export function setupPanel({ state, actions }) {
   });
 
   return {
-    /** Gespeicherte Einstellungen löschen und neu laden. */
+    /** Gespeicherte Einstellungen (Browser und Adresse) löschen und neu laden. */
     resetAll() {
+      resetting = true;
+      clearTimeout(timer);
       try {
         localStorage.removeItem(STORE_KEY);
         localStorage.removeItem(SECTIONS_KEY);
+      } catch {
+        /* egal */
+      }
+      // Einstellungen auch aus der Adresse entfernen, sonst kämen sie beim Neuladen zurück
+      try {
+        history.replaceState(null, '', `${location.pathname}${location.hash}`);
       } catch {
         /* egal */
       }

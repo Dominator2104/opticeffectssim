@@ -454,7 +454,14 @@ Filmszene (3 s + 0,5 s Nachlauf = 84 Bilder) in knapp 3 Minuten.
   Beschleunigung von 0 auf 0,99 c in 3 s Bordzeit, Kamera-Modell mit
   Objektiv und Streulicht, Unschärfe 1/48 s, Cockpit, Filmformat). Mit der
   Leertaste oder Play startet die Beschleunigung.
-- **Alles zurücksetzen:** löscht die gespeicherten Einstellungen und lädt neu.
+- **Alles zurücksetzen:** löscht die gespeicherten Einstellungen (auch aus der
+  Adresse) und lädt neu.
+- **Link kopieren:** Die Adresse der Seite enthält alle Einstellungen, die von
+  der Vorgabe abweichen, und die Blickrichtung, z. B.
+  `?beta=0,9&fov=95&star-model=camera&cam-lens=1&view=28.65,0`. Wer den Link
+  öffnet, sieht dieselbe Einstellung; die im eigenen Browser gespeicherten
+  Werte gelten dann nicht. „🔗 Link kopieren“ legt die Adresse in die
+  Zwischenablage.
 - **Speichern:** Alle Einstellungen und welche Abschnitte offen sind, merkt sich
   der Browser (localStorage) und stellt sie beim nächsten Öffnen wieder her
   (nicht der β-Regler).
@@ -604,6 +611,7 @@ src/
   optics.js         simuliertes Objektiv: Gauß, Airy, cos⁴, Tonkurven (reine Funktionen)
   video.js          Video kodieren (WebCodecs + mediabunny)
   panel.js          Abschnitte, Einstellungen speichern, Tastenkürzel, Handy-Leiste
+  urlstate.js       Einstellungen in der Adresse (Link teilen)
   showcase.js       Showcase-Poster (4K) mit markierten Sternen und Faktenkarten
   style.css
 tests/
@@ -612,6 +620,7 @@ tests/
   stars3d.test.js   Vitest
   motionblur.test.js Vitest (Bewegungsunschärfe)
   optics.test.js    Vitest (simuliertes Objektiv)
+  urlstate.test.js  Vitest (Einstellungen in der Adresse)
 assets/
   cockpit.png       freigestelltes Cockpit-Overlay (Standbild aus dem Film)
 ```
