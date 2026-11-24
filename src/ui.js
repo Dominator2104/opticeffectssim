@@ -423,11 +423,15 @@ export function createUI(state, cb) {
   });
   numberField('video-pre', (v) => (vid.pre = v), 0, 600);
   numberField('video-post', (v) => (vid.post = v), 0, 600);
+  numberField('video-post-scale', (v) => (vid.postScale = v), 1e-6, 1e9);
+  sel('video-post-unit', (v) => (vid.postUnit = Number(v)));
+  numberField('video-ramp', (v) => (vid.ramp = v), 0, 600);
   numberField('video-duration', (v) => (vid.duration = v), 0.1, 3600);
   numberField('video-scale', (v) => (vid.scale = v), 1e-6, 1e9);
   sel('video-scale-unit', (v) => (vid.scaleUnit = Number(v)));
   numberField('video-shutter', (v) => (vid.shutterDeg = v), 0, 360);
   bindCheckbox('video-blur', (v) => (vid.blur = v));
+  bindCheckbox('video-3d', (v) => (vid.fly3d = v));
   sel('video-codec', (v) => (vid.codec = v));
   numberField('video-bitrate', (v) => (vid.bitrateMbps = v), 0.1, 400);
   numberField('video-keyint', (v) => (vid.keyframeSeconds = v), 0.1, 60);

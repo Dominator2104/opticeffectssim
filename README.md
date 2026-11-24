@@ -158,8 +158,8 @@ Spektrum des Sterns als vollständiges Planck-Spektrum annimmt.
 ## Tests
 
 `npm test` führt `tests/physics.test.js`, `tests/blackbody.test.js`,
-`tests/stars3d.test.js`, `tests/motionblur.test.js` und `tests/optics.test.js` aus
-(80 Tests; die Tests der Bewegungsunschärfe und des Objektivs sind unten in den
+`tests/stars3d.test.js`, `tests/motionblur.test.js`, `tests/optics.test.js`,
+`tests/urlstate.test.js` und `tests/timeline.test.js` aus (90 Tests; die Tests der Bewegungsunschärfe und des Objektivs sind unten in den
 jeweiligen Abschnitten aufgeführt). Sollwerte bei β = 0,9:
 
 | Größe | Sollwert |
@@ -430,19 +430,35 @@ Jedes Bild bekommt genau den Zeitstempel k / Bildrate.
 |---|---|
 | Auflösung | wie Ansicht, 1280 × 720 bis 3840 × 2160, Film 2272 × 951 |
 | Bildrate | 24, 25, 30, 48, 50, 60 Bilder/s |
-| Ablauf | *Beschleunigungsphase*: Vorlauf (β₀ konstant) + ganze Phase + Nachlauf; *ab jetzt weiterlaufen*: feste Länge ab dem aktuellen Zustand |
-| Bordzeit je Videosekunde | Zeitmaßstab (s, min, h, Tage, Jahre); 1 s = Echtzeit an Bord |
-| Verschlusswinkel | `t_b = Winkel/360° · 1/Bildrate · Zeitmaßstab` (180° bei 24 Bilder/s = 1/48 s) |
+| Ablauf | *Beschleunigungsphase*: Vorlauf (β₀ konstant) + ganze Phase + Nachlauf (β₁ konstant); *ab jetzt weiterlaufen*: feste Länge ab dem aktuellen Zustand |
+| Bordzeit je Videosekunde | Zeitmaßstab für Vorlauf und Phase (s, min, h, Tage, Jahre); 1 s = Echtzeit an Bord |
+| Zeitraffer im Nachlauf | eigener Zeitmaßstab nach der Phase (Vorgabe 1 Jahr Bordzeit je Videosekunde) |
+| Übergang zum Zeitraffer | Videosekunden, in denen der Maßstab sanft vom Echtzeit- auf den Zeitraffer-Wert steigt (0 = Sprung) |
+| 3D-Flug durch das Sternfeld | Vorgabe an: Das Video fliegt durch das 3D-Sternfeld, auch wenn die Ansicht die Himmelskugel zeigt |
+| Verschlusswinkel | `t_b = Winkel/360° · 1/Bildrate · Zeitmaßstab` (180° bei 24 Bilder/s = 1/48 s); im Zeitraffer-Nachlauf bleibt t_b unverändert, die Sterne bleiben Punkte |
 | Bewegungsunschärfe | aus dem Verschluss, wie oben (aus der Beschleunigungsphase) |
 | Codec | H.264 (MP4), VP9 (WebM), AV1 (MP4); vorher wird geprüft, ob der Browser ihn in dieser Größe kodieren kann |
 | Bitrate, Schlüsselbild | Mbit/s; Abstand der Schlüsselbilder in s |
 | Cockpit, Werte | Cockpit-Overlay und Beschriftung in jedes Bild |
 
-Für Bild k wird die Bordzeit `τ_k = k/Bildrate · Zeitmaßstab + t_b` erreicht
+Für Bild k wird die Bordzeit `τ_k = τ(k/Bildrate) + t_b` erreicht
 (`advanceProperTime`, Zeit in S und Strecke mitgeführt), die Belichtung endet
-dort. Nach dem Export wird der vorige Zustand wiederhergestellt. Die Vorgabe
+dort. `τ(w)` (`src/timeline.js`, `videoProperTime`) wächst in Vorlauf und Phase
+mit dem Zeitmaßstab s₀, im Nachlauf mit dem Zeitraffer s(u):
+`ln s(u) = ln s₀ + (ln s₁ − ln s₀)·g(u/T)`, `g(x) = 3x² − 2x³`, also jede
+Zehnerpotenz gleich lang; `τ` ist das Integral davon (Simpsonregel).
+
+**Warum Zeitraffer im Nachlauf:** In Echtzeit ist der Flug durch das Sternfeld
+unsichtbar. In der Phase der Filmszene (0 → 0,99 c in 3 s Bordzeit) legt das
+Schiff 2,2·10⁻⁷ Lj zurück, in 1 s Nachlauf noch einmal so viel; die nächsten
+Sterne sind Lichtjahre entfernt und verschieben sich um etwa ein
+Zehntausendstel Pixel. Bei 0,99 c sind 1 Jahr Bordzeit 7,0 Lj (γ = 7,09), mit
+der Vorgabe (4 s Nachlauf, 1 s Übergang) etwa 22 Lj: Nahe Sterne ziehen
+sichtbar vorbei. Die Info-Zeile unter den Video-Einstellungen nennt die
+Strecke im Nachlauf. Nach dem Export wird der vorige Zustand wiederhergestellt. Die Vorgabe
 „Filmszene“ stellt 2272 × 951, 24 Bilder/s, Beschleunigungsphase,
-Echtzeit an Bord und 180° ein.
+Echtzeit an Bord, 180°, 1 s Vorlauf und 4 s Nachlauf mit Zeitraffer 1 Jahr/s
+ein.
 
 **Im Browser geprüft** (Chromium, Software-Rendering): 1280 × 720, 24 Bilder/s,
 H.264 und VP9 lesbar (ffprobe: richtige Bildzahl und Bildrate); Phase der
@@ -610,6 +626,7 @@ src/
   overlay.js        Cockpit-Bild, Beschriftung, Standbild-Export
   optics.js         simuliertes Objektiv: Gauß, Airy, cos⁴, Tonkurven (reine Funktionen)
   video.js          Video kodieren (WebCodecs + mediabunny)
+  timeline.js       Zeitablauf des Videos (Zeitraffer im Nachlauf)
   panel.js          Abschnitte, Einstellungen speichern, Tastenkürzel, Handy-Leiste
   urlstate.js       Einstellungen in der Adresse (Link teilen)
   showcase.js       Showcase-Poster (4K) mit markierten Sternen und Faktenkarten
@@ -620,6 +637,7 @@ tests/
   stars3d.test.js   Vitest
   motionblur.test.js Vitest (Bewegungsunschärfe)
   optics.test.js    Vitest (simuliertes Objektiv)
+  timeline.test.js  Vitest (Zeitablauf des Videos)
   urlstate.test.js  Vitest (Einstellungen in der Adresse)
 assets/
   cockpit.png       freigestelltes Cockpit-Overlay (Standbild aus dem Film)
