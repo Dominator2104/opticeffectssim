@@ -420,6 +420,8 @@ export function createUI(state, cb) {
     vid.mode = v;
     $('video-phase-opts').classList.toggle('hidden', v !== 'phase');
     $('video-run-opts').classList.toggle('hidden', v !== 'run');
+    // Im Ablauf „Beschleunigungsphase“ gilt dieser Maßstab nur für Vorlauf und Beschleunigung (Nachlauf: eigener Zeitraffer)
+    $('video-scale-label').textContent = v === 'phase' ? 'Zeitmaßstab Vorlauf + Beschleunigung' : 'Bordzeit je Videosekunde';
   });
   numberField('video-pre', (v) => (vid.pre = v), 0, 600);
   numberField('video-post', (v) => (vid.post = v), 0, 600);

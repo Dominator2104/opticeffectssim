@@ -374,7 +374,7 @@
               <div id="video-run-opts" class="hidden">
                 <label class="row">Länge <span><input id="video-duration" type="text" inputmode="decimal" size="5" value="5" /> s</span></label>
               </div>
-              <label class="row">Bordzeit je Videosekunde
+              <label class="row"><span id="video-scale-label">Zeitmaßstab Vorlauf + Beschleunigung</span>
                 <span><input id="video-scale" type="text" inputmode="decimal" size="6" value="1" />
                   <select id="video-scale-unit">
                     <option value="1" selected>s</option>
@@ -404,7 +404,9 @@
               </div>
               <details class="info"><summary>ⓘ Erklärung</summary><p class="note">Das Video wird Bild für Bild berechnet,
                 nicht in Echtzeit mitgeschnitten: Jedes Bild hat genau die gewählte Bildrate und Belichtung, auch wenn die
-                Berechnung länger dauert. Bordzeit je Videosekunde = Zeitraffer (1 s = Echtzeit). Die Verschlusszeit eines
+                Berechnung länger dauert. Der Zeitmaßstab (Bordzeit je Videosekunde, 1 s = Echtzeit) gilt im Ablauf
+                „Beschleunigungsphase“ für Vorlauf und Beschleunigung – für die Filmszene auf 1 s lassen, sonst schrumpft
+                die Beschleunigung auf Bruchteile eines Bildes. Die Verschlusszeit eines
                 Bildes ist Verschlusswinkel/360° · 1/Bildrate · Zeitraffer (Bordzeit); bei Echtzeit und 180° sind das bei
                 24 Bildern/s genau 1/48 s. Im Nachlauf kann ein eigener Zeitraffer gelten: In Echtzeit legt das Schiff in
                 Sekunden nur Lichtsekunden zurück, die Sterne sind aber Lichtjahre entfernt – der Flug durch das Sternfeld wird

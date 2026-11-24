@@ -968,7 +968,7 @@ function videoTimeline() {
   }
   // Verschlusszeit aus Verschlusswinkel und Zeitmaßstab von Vorlauf/Phase; im Zeitraffer-Nachlauf bleibt sie gleich
   const tb = v.blur ? (v.shutterDeg / 360 / v.fps) * scale : 0;
-  return { seconds, frames, tStart, usePhase, scale, tb, tauAt, phaseEndW };
+  return { seconds, frames, tStart, usePhase, scale, tb, tauAt, phaseEndW, phaseVideo: usePhase && v.mode === 'phase' ? phaseEndW - v.pre : NaN };
 }
 
 /** Strecke in S (Lj), die das Schiff im Nachlauf zurücklegt (β₁ konstant). */
@@ -1202,8 +1202,19 @@ function updateCameraInfo() {
   if (!document.getElementById('video-panel').classList.contains('hidden')) {
     const tl = videoTimeline();
     const vs = videoSize();
+    const vid = state.video;
+    let parts = '';
+    if (!tl.error && Number.isFinite(tl.phaseVideo)) {
+      const phaseFrames = Math.round(tl.phaseVideo * vid.fps);
+      parts = ` · Vorlauf ${num(vid.pre, 3)} s · Beschleunigung ${num(tl.phaseVideo, 3)} s (${phaseFrames} Bilder)` +
+        ` · Nachlauf ${num(vid.post, 3)} s`;
+      if (phaseFrames < 2) {
+        parts += ` · ⚠ Die Beschleunigung ist bei diesem Zeitmaßstab kürzer als zwei Bilder und fehlt praktisch im Video:` +
+          ` „Zeitmaßstab Vorlauf + Beschleunigung“ auf 1 s (Echtzeit) stellen; der Zeitraffer gehört nur in den Nachlauf.`;
+      }
+    }
     ui.setText('video-info', tl.error ? tl.error
-      : `${vs.width} × ${vs.height} · ${tl.frames} Bilder · ${num(tl.seconds, 3)} s Video = ${hudTime(tl.tauAt(tl.seconds))} Bordzeit` +
+      : `${vs.width} × ${vs.height} · ${tl.frames} Bilder · ${num(tl.seconds, 3)} s Video = ${hudTime(tl.tauAt(tl.seconds))} Bordzeit` + parts +
         (Number.isFinite(tl.phaseEndW) && state.video.post > 0
           ? ` · Strecke im Nachlauf ${num(videoPostDistanceLy(tl), 3)} Lj${state.video.fly3d || state.flight.enabled ? '' : ' (3D-Flug aus)'}`
           : '') +
