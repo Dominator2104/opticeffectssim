@@ -47,6 +47,7 @@ import {
 } from './optics.js';
 import { createVideoWriter, encoderSize, supportedCodecs, webCodecsAvailable, VIDEO_CODECS } from './video.js';
 import { setupPanel } from './panel.js';
+import { videoProperTime } from './timeline.js';
 import { generateCell, neededCells, REAL_DENSITY_PER_LY3 } from './stars3d.js';
 import { bodyCenter } from './bodies.js';
 import { visibleFraction, createVisibleLuminanceLookup } from './blackbody.js';
@@ -138,7 +139,11 @@ const state = {
     fps: 30,
     mode: 'phase', // 'phase' = Beschleunigungsphase von Anfang bis Ende, 'run' = ab jetzt
     pre: 1,
-    post: 1,
+    post: 4,
+    postScale: 1, // Zeitraffer im Nachlauf: Bordzeit je Videosekunde (in postUnit)
+    postUnit: 31557600, // 1 Jahr
+    ramp: 1, // Übergang auf den Zeitraffer in Videosekunden
+    fly3d: true, // 3D-Flug durch das Sternfeld rechnen, auch wenn die Ansicht die Himmelskugel zeigt
     duration: 5,
     scale: 1, // Bordzeit je Videosekunde (in scaleUnit)
     scaleUnit: 1,
@@ -922,6 +927,14 @@ function phaseProperDuration() {
   return valid ? properTimeNumeric((t) => accelBetaAt(acc, t), T, 2000) : NaN;
 }
 
+/** Obergrenze der Bildzahl eines Videos (1 Stunde bei 60 Bildern/s). */
+const MAX_VIDEO_FRAMES = 216000;
+/** Bordzeit der Beschleunigungsphase (nur für Hinweise). */
+function tauAtPhaseEnd() {
+  const tau = phaseProperDuration();
+  return Number.isFinite(tau) ? tau : 0;
+}
+
 /** Ablauf des Videos: Startzeit in S, Bordzeit-Dauer, Zahl der Bilder, Verschlusszeit. */
 function videoTimeline() {
   const v = state.video;
@@ -931,19 +944,38 @@ function videoTimeline() {
   let seconds;
   let tStart;
   let usePhase;
+  let tauAt; // Bordzeit seit Videobeginn zur Videozeit w
+  let phaseEndW = Infinity;
   if (v.mode === 'phase') {
     if (!valid) return { error: 'Für „Beschleunigungsphase“ müssen sich Start- und End-β unterscheiden.' };
-    seconds = v.pre + phaseProperDuration() / scale + v.post;
+    const phaseTau = phaseProperDuration();
+    const opts = { pre: v.pre, phaseTau, scale, postScale: v.postScale * v.postUnit, ramp: v.ramp };
+    seconds = v.pre + phaseTau / scale + v.post;
+    phaseEndW = v.pre + phaseTau / scale;
     tStart = -v.pre * scale * lorentzGamma(acc.beta0); // Vorlauf: β₀ konstant, dt = γ·dτ
     usePhase = true;
+    tauAt = (w) => videoProperTime(w, opts);
   } else {
     seconds = v.duration;
     usePhase = valid && acc.active && (acc.running || phaseActive());
     tStart = acc.t;
+    tauAt = (w) => w * scale;
   }
   const frames = Math.max(1, Math.round(seconds * v.fps));
+  if (frames > MAX_VIDEO_FRAMES) {
+    return { error: `Das Video hätte ${num(frames, 3)} Bilder (${hudTime(seconds)} lang) – „Bordzeit je Videosekunde“ erhöhen` +
+      ` (Beschleunigungsphase an Bord: ${hudTime(tauAtPhaseEnd())}).` };
+  }
+  // Verschlusszeit aus Verschlusswinkel und Zeitmaßstab von Vorlauf/Phase; im Zeitraffer-Nachlauf bleibt sie gleich
   const tb = v.blur ? (v.shutterDeg / 360 / v.fps) * scale : 0;
-  return { seconds, frames, tStart, usePhase, scale, tb };
+  return { seconds, frames, tStart, usePhase, scale, tb, tauAt, phaseEndW };
+}
+
+/** Strecke in S (Lj), die das Schiff im Nachlauf zurücklegt (β₁ konstant). */
+function videoPostDistanceLy(tl) {
+  if (!Number.isFinite(tl.phaseEndW)) return 0;
+  const dTau = tl.tauAt(tl.seconds) - tl.tauAt(tl.phaseEndW);
+  return advanceProperTime(() => state.accel.beta1, 0, dTau, 16).distanceLy;
 }
 
 async function exportVideo() {
@@ -964,6 +996,7 @@ async function exportVideo() {
     const saved = {
       beta: state.beta, accT: acc.t, accActive: acc.active, accRunning: acc.running,
       observer: [...f.observer], tau: f.tau, t: f.t, distance: f.distance, flightRunning: f.running,
+      flightEnabled: f.enabled,
     };
     const frameCanvas = document.createElement('canvas');
     frameCanvas.width = size.width;
@@ -980,9 +1013,14 @@ async function exportVideo() {
       acc.running = false;
       f.running = false;
       if (tl.usePhase) acc.active = true;
+      if (v.fly3d && !f.enabled) {
+        // 3D-Flug nur für das Video einschalten (die Ansicht bleibt bei der Himmelskugel)
+        f.enabled = true;
+        if (!f.anchors) placeBodies3d();
+      }
       for (let k = 0; k < tl.frames; k++) {
-        // Ende der Belichtung von Bild k: τ = k/fps · Zeitraffer + t_b
-        const tauTarget = (k / v.fps) * tl.scale + tl.tb;
+        // Ende der Belichtung von Bild k: Bordzeit zur Videozeit k/fps (mit Zeitraffer im Nachlauf) + t_b
+        const tauTarget = tl.tauAt(k / v.fps) + tl.tb;
         const step = advanceProperTime(betaOfT, t, tauTarget - tauNow, 32);
         t = step.t;
         z += step.distanceLy;
@@ -1007,7 +1045,8 @@ async function exportVideo() {
           }
         }
         if (v.caption) {
-          drawCaption(g, `β = ${num(state.beta, 5)} · γ = ${num(lorentzGamma(state.beta), 4)} · Bordzeit ${num(tauNow, 4)} s` +
+          drawCaption(g, `β = ${num(state.beta, 5)} · γ = ${num(lorentzGamma(state.beta), 4)} · Bordzeit ${hudTime(tauNow)}` +
+            (f.enabled ? ` · Strecke ${num(z, 3)} Lj` : '') +
             (tl.tb > 0 ? ` · Verschluss ${num(v.shutterDeg, 3)}°` : ''), size.width, size.height);
         }
         await writer.add(k);
@@ -1033,6 +1072,10 @@ async function exportVideo() {
       acc.active = saved.accActive;
       acc.running = saved.accRunning;
       Object.assign(f, { observer: saved.observer, tau: saved.tau, t: saved.t, distance: saved.distance, running: saved.flightRunning });
+      if (!saved.flightEnabled && f.enabled) {
+        f.enabled = false;
+        view.field3d.clear();
+      }
       if (f.enabled) view.field3d.setObserver(f.observer);
       ui.setBeta(saved.beta);
     }
@@ -1089,6 +1132,12 @@ function applyFilmPreset() {
   setControl('video-scale', '1');
   setControl('video-scale-unit', '1');
   setControl('video-shutter', '180');
+  setControl('video-pre', '1');
+  setControl('video-post', '4');
+  setControl('video-post-scale', '1');
+  setControl('video-post-unit', '31557600');
+  setControl('video-ramp', '1');
+  setControl('video-3d', true);
   ui.setStatus('Vorgabe Filmszene gesetzt: ▶ Start unter „Beschleunigungsphase“ (oder Leertaste).');
 }
 
@@ -1154,7 +1203,10 @@ function updateCameraInfo() {
     const tl = videoTimeline();
     const vs = videoSize();
     ui.setText('video-info', tl.error ? tl.error
-      : `${vs.width} × ${vs.height} · ${tl.frames} Bilder · ${num(tl.seconds, 3)} s Video = ${hudTime(tl.seconds * tl.scale)} Bordzeit` +
+      : `${vs.width} × ${vs.height} · ${tl.frames} Bilder · ${num(tl.seconds, 3)} s Video = ${hudTime(tl.tauAt(tl.seconds))} Bordzeit` +
+        (Number.isFinite(tl.phaseEndW) && state.video.post > 0
+          ? ` · Strecke im Nachlauf ${num(videoPostDistanceLy(tl), 3)} Lj${state.video.fly3d || state.flight.enabled ? '' : ' (3D-Flug aus)'}`
+          : '') +
         ` · Verschlusszeit je Bild ${tl.tb > 0 ? `${num(tl.tb, 3)} s Bordzeit` : 'aus'}` +
         (webCodecsAvailable() ? '' : ' · Dieser Browser kann keine Videos kodieren.'));
   }
