@@ -431,9 +431,10 @@ Jedes Bild bekommt genau den Zeitstempel k / Bildrate.
 | Auflösung | wie Ansicht, 1280 × 720 bis 3840 × 2160, Film 2272 × 951 |
 | Bildrate | 24, 25, 30, 48, 50, 60 Bilder/s |
 | Ablauf | *Beschleunigungsphase*: Vorlauf (β₀ konstant) + ganze Phase + Nachlauf (β₁ konstant); *ab jetzt weiterlaufen*: feste Länge ab dem aktuellen Zustand |
-| Bordzeit je Videosekunde | Zeitmaßstab für Vorlauf und Phase (s, min, h, Tage, Jahre); 1 s = Echtzeit an Bord |
+| Beschleunigung im Video | Ablauf „Beschleunigungsphase“: Die ganze Beschleunigung dauert im Video genau so lange (Vorgabe 2 s); Zeitmaßstab s₀ = Bordzeit der Phase / Videodauer, der Vorlauf läuft im selben Maßstab |
+| Bordzeit je Videosekunde | nur bei „ab jetzt weiterlaufen“: s, min, h, Tage, Jahre; 1 s = Echtzeit an Bord |
 | Zeitraffer im Nachlauf | eigener Zeitmaßstab nach der Phase (Vorgabe 1 Jahr Bordzeit je Videosekunde) |
-| Übergang zum Zeitraffer | Videosekunden, in denen der Maßstab sanft vom Echtzeit- auf den Zeitraffer-Wert steigt (0 = Sprung) |
+| Übergang zum Zeitraffer | Videosekunden, in denen der Maßstab sanft von s₀ auf den Zeitraffer-Wert steigt; Vorgabe 0 = Zeitraffer ab dem ersten Bild nach der Beschleunigung |
 | 3D-Flug durch das Sternfeld | Vorgabe an: Das Video fliegt durch das 3D-Sternfeld, auch wenn die Ansicht die Himmelskugel zeigt |
 | Verschlusswinkel | `t_b = Winkel/360° · 1/Bildrate · Zeitmaßstab` (180° bei 24 Bilder/s = 1/48 s); im Zeitraffer-Nachlauf bleibt t_b unverändert, die Sterne bleiben Punkte |
 | Bewegungsunschärfe | aus dem Verschluss, wie oben (aus der Beschleunigungsphase) |
@@ -453,12 +454,13 @@ unsichtbar. In der Phase der Filmszene (0 → 0,99 c in 3 s Bordzeit) legt das
 Schiff 2,2·10⁻⁷ Lj zurück, in 1 s Nachlauf noch einmal so viel; die nächsten
 Sterne sind Lichtjahre entfernt und verschieben sich um etwa ein
 Zehntausendstel Pixel. Bei 0,99 c sind 1 Jahr Bordzeit 7,0 Lj (γ = 7,09), mit
-der Vorgabe (4 s Nachlauf, 1 s Übergang) etwa 22 Lj: Nahe Sterne ziehen
-sichtbar vorbei. Die Info-Zeile unter den Video-Einstellungen nennt die
-Strecke im Nachlauf. Nach dem Export wird der vorige Zustand wiederhergestellt. Die Vorgabe
+der Vorgabe (4 s Nachlauf, Zeitraffer sofort) etwa 28 Lj: Nahe Sterne ziehen
+sichtbar vorbei. Die Info-Zeile unter den Video-Einstellungen nennt Dauer und Bildzahl von
+Vorlauf, Beschleunigung und Nachlauf sowie die Strecke im Nachlauf. Nach dem Export wird der vorige Zustand wiederhergestellt. Die Vorgabe
 „Filmszene“ stellt 2272 × 951, 24 Bilder/s, Beschleunigungsphase,
-Echtzeit an Bord, 180°, 1 s Vorlauf und 4 s Nachlauf mit Zeitraffer 1 Jahr/s
-ein.
+180°, kein Vorlauf, Beschleunigung in 2 s Video (3 s Bordzeit, Maßstab 1,5) und
+direkt danach 4 s Nachlauf mit Zeitraffer 1 Jahr/s ein: ein durchgehendes Video
+mit 144 Bildern bei 24 Bildern/s.
 
 **Im Browser geprüft** (Chromium, Software-Rendering): 1280 × 720, 24 Bilder/s,
 H.264 und VP9 lesbar (ffprobe: richtige Bildzahl und Bildrate); Phase der

@@ -357,7 +357,8 @@
                 </select>
               </label>
               <div id="video-phase-opts">
-                <label class="row">Vorlauf / Nachlauf <span><input id="video-pre" type="text" inputmode="decimal" size="4" value="1" /> / <input id="video-post" type="text" inputmode="decimal" size="4" value="4" /> s</span></label>
+                <label class="row">Beschleunigung im Video <span><input id="video-phase-seconds" type="text" inputmode="decimal" size="4" value="2" /> s</span></label>
+                <label class="row">Vorlauf / Nachlauf <span><input id="video-pre" type="text" inputmode="decimal" size="4" value="0" /> / <input id="video-post" type="text" inputmode="decimal" size="4" value="4" /> s</span></label>
                 <label class="row">Zeitraffer im Nachlauf
                   <span><input id="video-post-scale" type="text" inputmode="decimal" size="5" value="1" />
                     <select id="video-post-unit">
@@ -369,12 +370,12 @@
                       <option value="31557600" selected>Jahre</option>
                     </select> / s</span>
                 </label>
-                <label class="row">Übergang zum Zeitraffer <span><input id="video-ramp" type="text" inputmode="decimal" size="4" value="1" /> s</span></label>
+                <label class="row">Übergang zum Zeitraffer <span><input id="video-ramp" type="text" inputmode="decimal" size="4" value="0" /> s</span></label>
               </div>
               <div id="video-run-opts" class="hidden">
                 <label class="row">Länge <span><input id="video-duration" type="text" inputmode="decimal" size="5" value="5" /> s</span></label>
               </div>
-              <label class="row">Bordzeit je Videosekunde
+              <label class="row hidden" id="video-scale-row">Bordzeit je Videosekunde
                 <span><input id="video-scale" type="text" inputmode="decimal" size="6" value="1" />
                   <select id="video-scale-unit">
                     <option value="1" selected>s</option>
@@ -404,7 +405,10 @@
               </div>
               <details class="info"><summary>ⓘ Erklärung</summary><p class="note">Das Video wird Bild für Bild berechnet,
                 nicht in Echtzeit mitgeschnitten: Jedes Bild hat genau die gewählte Bildrate und Belichtung, auch wenn die
-                Berechnung länger dauert. Bordzeit je Videosekunde = Zeitraffer (1 s = Echtzeit). Die Verschlusszeit eines
+                Berechnung länger dauert. Im Ablauf „Beschleunigungsphase“ wird die ganze Beschleunigung
+                auf die angegebene Videodauer gestreckt oder gestaucht (Zeitmaßstab = Bordzeit der Phase / Videodauer; der Vorlauf
+                läuft im selben Maßstab). Direkt danach beginnt der Nachlauf mit eigenem Zeitraffer (Übergang 0 s = sofort).
+                Bei „ab jetzt weiterlaufen“ gilt „Bordzeit je Videosekunde“ (1 s = Echtzeit). Die Verschlusszeit eines
                 Bildes ist Verschlusswinkel/360° · 1/Bildrate · Zeitraffer (Bordzeit); bei Echtzeit und 180° sind das bei
                 24 Bildern/s genau 1/48 s. Im Nachlauf kann ein eigener Zeitraffer gelten: In Echtzeit legt das Schiff in
                 Sekunden nur Lichtsekunden zurück, die Sterne sind aber Lichtjahre entfernt – der Flug durch das Sternfeld wird
