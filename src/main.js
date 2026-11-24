@@ -138,11 +138,12 @@ const state = {
     res: '1920x1080',
     fps: 30,
     mode: 'phase', // 'phase' = Beschleunigungsphase von Anfang bis Ende, 'run' = ab jetzt
-    pre: 1,
+    phaseSeconds: 2, // Dauer der Beschleunigung im Video (s)
+    pre: 0,
     post: 4,
     postScale: 1, // Zeitraffer im Nachlauf: Bordzeit je Videosekunde (in postUnit)
     postUnit: 31557600, // 1 Jahr
-    ramp: 1, // Übergang auf den Zeitraffer in Videosekunden
+    ramp: 0, // Übergang auf den Zeitraffer in Videosekunden
     fly3d: true, // 3D-Flug durch das Sternfeld rechnen, auch wenn die Ansicht die Himmelskugel zeigt
     duration: 5,
     scale: 1, // Bordzeit je Videosekunde (in scaleUnit)
@@ -929,17 +930,12 @@ function phaseProperDuration() {
 
 /** Obergrenze der Bildzahl eines Videos (1 Stunde bei 60 Bildern/s). */
 const MAX_VIDEO_FRAMES = 216000;
-/** Bordzeit der Beschleunigungsphase (nur für Hinweise). */
-function tauAtPhaseEnd() {
-  const tau = phaseProperDuration();
-  return Number.isFinite(tau) ? tau : 0;
-}
 
 /** Ablauf des Videos: Startzeit in S, Bordzeit-Dauer, Zahl der Bilder, Verschlusszeit. */
 function videoTimeline() {
   const v = state.video;
   const acc = state.accel;
-  const scale = videoTimeScale();
+  let scale = videoTimeScale();
   const valid = accelTiming(acc).valid;
   let seconds;
   let tStart;
@@ -949,6 +945,8 @@ function videoTimeline() {
   if (v.mode === 'phase') {
     if (!valid) return { error: 'Für „Beschleunigungsphase“ müssen sich Start- und End-β unterscheiden.' };
     const phaseTau = phaseProperDuration();
+    // Die ganze Beschleunigung dauert im Video genau phaseSeconds: Zeitmaßstab = Bordzeit der Phase / Videodauer
+    scale = phaseTau / v.phaseSeconds;
     const opts = { pre: v.pre, phaseTau, scale, postScale: v.postScale * v.postUnit, ramp: v.ramp };
     seconds = v.pre + phaseTau / scale + v.post;
     phaseEndW = v.pre + phaseTau / scale;
@@ -963,8 +961,8 @@ function videoTimeline() {
   }
   const frames = Math.max(1, Math.round(seconds * v.fps));
   if (frames > MAX_VIDEO_FRAMES) {
-    return { error: `Das Video hätte ${num(frames, 3)} Bilder (${hudTime(seconds)} lang) – „Bordzeit je Videosekunde“ erhöhen` +
-      ` (Beschleunigungsphase an Bord: ${hudTime(tauAtPhaseEnd())}).` };
+    return { error: `Das Video hätte ${num(frames, 3)} Bilder (${hudTime(seconds)} lang) – ` +
+      (v.mode === 'phase' ? 'Vorlauf, Beschleunigung oder Nachlauf kürzen.' : '„Bordzeit je Videosekunde“ erhöhen oder die Länge kürzen.') };
   }
   // Verschlusszeit aus Verschlusswinkel und Zeitmaßstab von Vorlauf/Phase; im Zeitraffer-Nachlauf bleibt sie gleich
   const tb = v.blur ? (v.shutterDeg / 360 / v.fps) * scale : 0;
@@ -1129,14 +1127,15 @@ function applyFilmPreset() {
   setControl('video-res', '2272x951');
   setControl('video-fps', '24');
   setControl('video-mode', 'phase');
+  setControl('video-phase-seconds', '2');
   setControl('video-scale', '1');
   setControl('video-scale-unit', '1');
   setControl('video-shutter', '180');
-  setControl('video-pre', '1');
+  setControl('video-pre', '0');
   setControl('video-post', '4');
   setControl('video-post-scale', '1');
   setControl('video-post-unit', '31557600');
-  setControl('video-ramp', '1');
+  setControl('video-ramp', '0');
   setControl('video-3d', true);
   ui.setStatus('Vorgabe Filmszene gesetzt: ▶ Start unter „Beschleunigungsphase“ (oder Leertaste).');
 }
@@ -1207,11 +1206,8 @@ function updateCameraInfo() {
     if (!tl.error && Number.isFinite(tl.phaseVideo)) {
       const phaseFrames = Math.round(tl.phaseVideo * vid.fps);
       parts = ` · Vorlauf ${num(vid.pre, 3)} s · Beschleunigung ${num(tl.phaseVideo, 3)} s (${phaseFrames} Bilder)` +
-        ` · Nachlauf ${num(vid.post, 3)} s`;
-      if (phaseFrames < 2) {
-        parts += ` · ⚠ Die Beschleunigung ist bei diesem Zeitmaßstab kürzer als zwei Bilder und fehlt praktisch im Video:` +
-          ` „Zeitmaßstab Vorlauf + Beschleunigung“ auf 1 s (Echtzeit) stellen; der Zeitraffer gehört nur in den Nachlauf.`;
-      }
+        ` = ${hudTime(tl.phaseVideo * tl.scale)} Bordzeit (Zeitmaßstab ${num(tl.scale, 3)})` +
+        ` · Nachlauf ${num(vid.post, 3)} s` + (vid.ramp > 0 ? `, Übergang ${num(vid.ramp, 3)} s` : ', Zeitraffer sofort');
     }
     ui.setText('video-info', tl.error ? tl.error
       : `${vs.width} × ${vs.height} · ${tl.frames} Bilder · ${num(tl.seconds, 3)} s Video = ${hudTime(tl.tauAt(tl.seconds))} Bordzeit` + parts +
